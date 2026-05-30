@@ -1,0 +1,145 @@
+---
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: vault
+  namespace: ecommerce
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: Role
+metadata:
+  name: vault
+  namespace: ecommerce
+rules:
+  - apiGroups: [""]
+    resources: ["secrets"]
+    verbs: ["create", "get", "patch"]
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: RoleBinding
+metadata:
+  name: vault
+  namespace: ecommerce
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: Role
+  name: vault
+subjects:
+  - kind: ServiceAccount
+    name: vault
+    namespace: ecommerce
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRoleBinding
+metadata:
+  name: vault-token-review
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: ClusterRole
+  name: system:auth-delegator
+subjects:
+  - kind: ServiceAccount
+    name: vault
+    namespace: ecommerce
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: vault
+  namespace: ecommerce
+spec:
+  clusterIP: None
+  ports:
+    - name: api
+      port: 8200
+      targetPort: 8200
+    - name: cluster
+      port: 8201
+      targetPort: 8201
+  selector:
+    app: vault
+---
+apiVersion: apps/v1
+kind: StatefulSet
+metadata:
+  name: vault
+  namespace: ecommerce
+spec:
+  serviceName: vault
+  replicas: 1
+  selector:
+    matchLabels:
+      app: vault
+  template:
+    metadata:
+      labels:
+        app: vault
+    spec:
+      serviceAccountName: vault
+      volumes:
+        - name: config
+          configMap:
+            name: vault-config
+        - name: unseal-keys
+          secret:
+            secretName: vault-unseal-keys
+            optional: true
+      containers:
+        - name: vault
+          image: hashicorp/vault:1.16
+          command:
+            - /bin/sh
+            - -c
+            - |
+              set -e
+              vault server -config=/etc/vault/config/vault.hcl &
+              VAULT_PID=$!
+              for i in $(seq 1 30); do
+                if curl -sf http://127.0.0.1:8200/v1/sys/seal-status > /dev/null 2>&1; then
+                  break
+                fi
+                sleep 1
+              done
+              if [ -f /etc/vault/unseal/key-0 ]; then
+                for f in /etc/vault/unseal/key-*; do
+                  [ -f "$f" ] && vault operator unseal "$(cat "$f")" 2>/dev/null
+                done
+              fi
+              wait $VAULT_PID
+          env:
+            - name: VAULT_ADDR
+              value: http://127.0.0.1:8200
+          ports:
+            - containerPort: 8200
+              name: api
+            - containerPort: 8201
+              name: cluster
+          volumeMounts:
+            - name: config
+              mountPath: /etc/vault/config
+            - name: unseal-keys
+              mountPath: /etc/vault/unseal
+            - name: data
+              mountPath: /vault/data
+          readinessProbe:
+            httpGet:
+              path: /v1/sys/health
+              port: 8200
+            initialDelaySeconds: 3
+            periodSeconds: 5
+          resources:
+            requests:
+              memory: 256Mi
+              cpu: 250m
+            limits:
+              memory: 512Mi
+              cpu: 500m
+  volumeClaimTemplates:
+    - metadata:
+        name: data
+      spec:
+        accessModes:
+          - ReadWriteOnce
+        resources:
+          requests:
+            storage: 1Gi

@@ -1,0 +1,82 @@
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: chromadb
+  namespace: ecommerce
+spec:
+  ports:
+    - port: 8000
+      targetPort: 8000
+  selector:
+    app: chromadb
+---
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: chroma-pvc
+  namespace: ecommerce
+spec:
+  accessModes:
+    - ReadWriteMany
+  resources:
+    requests:
+      storage: 10Gi
+---
+apiVersion: apps/v1
+kind: StatefulSet
+metadata:
+  name: chromadb
+  namespace: ecommerce
+spec:
+  serviceName: chromadb
+  replicas: 1
+  selector:
+    matchLabels:
+      app: chromadb
+  template:
+    metadata:
+      labels:
+        app: chromadb
+    spec:
+      containers:
+        - name: chromadb
+          image: ghcr.io/chroma-core/chroma:latest
+          ports:
+            - containerPort: 8000
+          env:
+            - name: IS_PERSISTENT
+              value: "TRUE"
+            - name: PERSIST_DIRECTORY
+              value: /chroma/data
+          volumeMounts:
+            - name: data
+              mountPath: /chroma/data
+          resources:
+            requests:
+              memory: 2Gi
+              cpu: 1
+            limits:
+              memory: 4Gi
+              cpu: 2
+          readinessProbe:
+            httpGet:
+              path: /api/v1/health
+              port: 8000
+            initialDelaySeconds: 15
+            periodSeconds: 10
+          livenessProbe:
+            httpGet:
+              path: /api/v1/health
+              port: 8000
+            initialDelaySeconds: 30
+            periodSeconds: 15
+  volumeClaimTemplates:
+    - metadata:
+        name: data
+      spec:
+        accessModes:
+          - ReadWriteMany
+        resources:
+          requests:
+            storage: 10Gi

@@ -1,0 +1,125 @@
+---
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: ingest-pvc
+  namespace: ecommerce
+spec:
+  accessModes:
+    - ReadWriteOnce
+  resources:
+    requests:
+      storage: 1Gi
+---
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: csv-pvc
+  namespace: ecommerce
+spec:
+  accessModes:
+    - ReadWriteMany
+  resources:
+    requests:
+      storage: 5Gi
+---
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: pipeline-config
+  namespace: ecommerce
+data:
+  S3_ENDPOINT: "http://minio:9000"
+  S3_BUCKET: "ingest"
+  TARGET_SCHEMA: "inventory"
+  LOG_LEVEL: "INFO"
+  PYTHONUNBUFFERED: "1"
+---
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: mlops-pipeline
+  namespace: ecommerce
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: Role
+metadata:
+  name: mlops-pipeline
+  namespace: ecommerce
+rules:
+  - apiGroups: [""]
+    resources: ["pods", "pods/log"]
+    verbs: ["get", "list", "watch"]
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: RoleBinding
+metadata:
+  name: mlops-pipeline
+  namespace: ecommerce
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: Role
+  name: mlops-pipeline
+subjects:
+  - kind: ServiceAccount
+    name: mlops-pipeline
+    namespace: ecommerce
+---
+apiVersion: batch/v1
+kind: CronJob
+metadata:
+  name: mlops-pipeline
+  namespace: ecommerce
+spec:
+  schedule: "*/1 * * * *"
+  concurrencyPolicy: Forbid
+  startingDeadlineSeconds: 120
+  jobTemplate:
+    spec:
+      backoffLimit: 2
+      ttlSecondsAfterFinished: 300
+      template:
+        spec:
+          serviceAccountName: mlops-pipeline
+          restartPolicy: OnFailure
+          containers:
+            - name: pipeline
+              image: backend:latest
+              command:
+                - python
+                - run_pipeline.py
+                - --all
+                - --target
+                - inventory
+              envFrom:
+                - configMapRef:
+                    name: pipeline-config
+              env:
+                - name: CHROMA_DB_PATH
+                  value: /app/data/chroma_shipping_db
+                - name: SENTENCE_TRANSFORMERS_HOME
+                  value: /cache
+              volumeMounts:
+                - name: ingest-storage
+                  mountPath: /app/data/ingest
+                - name: csv-storage
+                  mountPath: /app/data/csv
+                - name: chroma-storage
+                  mountPath: /app/data/chroma_shipping_db
+              resources:
+                requests:
+                  memory: 512Mi
+                  cpu: 256m
+                limits:
+                  memory: 2Gi
+                  cpu: 1
+          volumes:
+            - name: ingest-storage
+              persistentVolumeClaim:
+                claimName: ingest-pvc
+            - name: csv-storage
+              persistentVolumeClaim:
+                claimName: csv-pvc
+            - name: chroma-storage
+              persistentVolumeClaim:
+                claimName: chroma-pvc

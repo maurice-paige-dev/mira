@@ -1,7 +1,7 @@
 import { useState, useRef, useEffect } from 'react';
 import './ChatBot.css';
 
-const API_URL = 'http://localhost:8000';
+const API_URL = import.meta.env.VITE_API_URL || 'http://localhost:8000';
 
 const SUGGESTED_QUESTIONS = [
   'What is the average shipping cost for Queso Cabrales?',

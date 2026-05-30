@@ -1,0 +1,134 @@
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: vault-bootstrap
+  namespace: ecommerce
+spec:
+  ttlSecondsAfterFinished: 3600
+  template:
+    spec:
+      serviceAccountName: vault
+      restartPolicy: OnFailure
+      containers:
+        - name: bootstrap
+          image: hashicorp/vault:1.16
+          securityContext:
+            runAsUser: 0
+          command:
+            - /bin/sh
+            - -c
+            - |
+              set -e
+
+              apk add --no-cache jq
+
+              VAULT_ADDR=http://vault-0.vault:8200
+              export VAULT_ADDR
+
+              wait_for_vault() {
+                for i in $(seq 1 30); do
+                  if curl -s "$VAULT_ADDR/v1/sys/seal-status" > /dev/null 2>&1; then
+                    return 0
+                  fi
+                  echo "Waiting for Vault... ($i/30)"
+                  sleep 2
+                done
+                echo "Vault did not become available"
+                exit 1
+              }
+
+              already_initialized() {
+                RESP=$(curl -s "$VAULT_ADDR/v1/sys/seal-status" 2>/dev/null)
+                echo "$RESP" | jq -e '.initialized == true' > /dev/null 2>&1
+              }
+
+              wait_for_vault
+
+              if already_initialized; then
+                echo "Vault already initialized — skipping bootstrap"
+                exit 0
+              fi
+
+              echo "Initializing Vault..."
+              INIT_JSON=$(vault operator init -format=json -key-shares=5 -key-threshold=3)
+
+              KEY_0=$(echo "$INIT_JSON"   | jq -r '.keys[0]')
+              KEY_1=$(echo "$INIT_JSON"   | jq -r '.keys[1]')
+              KEY_2=$(echo "$INIT_JSON"   | jq -r '.keys[2]')
+              KEY_3=$(echo "$INIT_JSON"   | jq -r '.keys[3]')
+              KEY_4=$(echo "$INIT_JSON"   | jq -r '.keys[4]')
+              ROOT_TOKEN=$(echo "$INIT_JSON" | jq -r '.root_token')
+
+              echo "Storing unseal keys in K8s Secret (via K8s API)..."
+              KUBE_TOKEN=$(cat /var/run/secrets/kubernetes.io/serviceaccount/token)
+
+              SECRET_PAYLOAD=$(jq -n \
+                --arg k0 "$KEY_0" \
+                --arg k1 "$KEY_1" \
+                --arg k2 "$KEY_2" \
+                --arg k3 "$KEY_3" \
+                --arg k4 "$KEY_4" \
+                --arg rt "$ROOT_TOKEN" \
+                '{
+                  apiVersion: "v1",
+                  kind: "Secret",
+                  metadata: {name: "vault-unseal-keys", namespace: "ecommerce"},
+                  type: "Opaque",
+                  stringData: {
+                    "key-0": $k0,
+                    "key-1": $k1,
+                    "key-2": $k2,
+                    "key-3": $k3,
+                    "key-4": $k4,
+                    "root-token": $rt
+                  }
+                }')
+
+              curl -sf -k \
+                -H "Authorization: Bearer $KUBE_TOKEN" \
+                -H "Content-Type: application/json" \
+                -X POST \
+                -d "$SECRET_PAYLOAD" \
+                https://kubernetes.default.svc/api/v1/namespaces/ecommerce/secrets
+
+              echo "Unsealing Vault..."
+              vault operator unseal "$KEY_0"
+              vault operator unseal "$KEY_1"
+              vault operator unseal "$KEY_2"
+
+              echo "Logging in with root token..."
+              vault login "$ROOT_TOKEN"
+
+              echo "Enabling KV v2 at secret/..."
+              vault secrets enable -path=secret kv-v2 2>/dev/null || true
+
+              echo "Writing application secrets..."
+              vault kv put secret/ecommerce/postgres username=products password=changeme
+              vault kv put secret/ecommerce/minio access-key=minioadmin secret-key=minioadmin
+
+              echo "Enabling Kubernetes auth..."
+              vault auth enable kubernetes 2>/dev/null || true
+
+              echo "Configuring K8s auth backend..."
+              vault write auth/kubernetes/config \
+                kubernetes_host=https://kubernetes.default.svc \
+                token_reviewer_jwt="$(cat /var/run/secrets/kubernetes.io/serviceaccount/token)"
+
+              echo "Writing policy: ecommerce..."
+              vault policy write ecommerce - << 'POL'
+              path "secret/data/ecommerce/*" {
+                capabilities = ["read"]
+              }
+              POL
+
+              echo "Creating K8s auth role: ecommerce..."
+              vault write auth/kubernetes/role/ecommerce \
+                bound_service_account_names=external-secrets \
+                bound_service_account_namespaces=external-secrets \
+                policies=ecommerce \
+                ttl=1h
+
+              echo "Vault bootstrap complete!"
+          env:
+            - name: VAULT_ADDR
+              value: http://vault-0.vault:8200

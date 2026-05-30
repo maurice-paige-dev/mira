@@ -34,5 +34,8 @@ chroma_shipping_db/
 # --- MLOps ingest archive ---
 data/ingest/processed/
 
+# --- Generated pipeline data ---
+data/csv/
+
 # --- Orphaned / unused ---
 company-document-text.csv
