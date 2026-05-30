@@ -31,5 +31,8 @@ dist/
 # --- Vector store (regenerate via rag_shipping_advisor.py) ---
 chroma_shipping_db/
 
+# --- MLOps ingest archive ---
+data/ingest/processed/
+
 # --- Orphaned / unused ---
 company-document-text.csv
