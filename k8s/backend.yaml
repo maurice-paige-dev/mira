@@ -45,32 +45,18 @@ spec:
             - /bin/sh
             - -c
             - |
-              if ls /app/data/csv/*.csv >/dev/null 2>&1; then
-                echo "Building ChromaDB from CSV data ..."
-                python -m backend.vector_store --no-interactive
-              else
-                echo "No CSV data. Creating empty ChromaDB collection ..."
-                python -c "
+              echo "Ensuring ChromaDB collection exists ..."
+              python -c "
               import chromadb, pathlib, sys
               from chromadb.config import Settings
               d = pathlib.Path('/app/data/chroma_shipping_db')
               d.mkdir(parents=True, exist_ok=True)
               chromadb.PersistentClient(path=str(d), settings=Settings(anonymized_telemetry=False)).get_or_create_collection(name='shipping_advisor', metadata={'hnsw:space': 'cosine'})
-              print('Empty ChromaDB collection ready')
+              print('ChromaDB collection ready')
               "
-              fi
           volumeMounts:
-            - name: csv-storage
-              mountPath: /app/data/csv
             - name: chroma-storage
               mountPath: /app/data/chroma_shipping_db
-          resources:
-            requests:
-              memory: 512Mi
-              cpu: 256m
-            limits:
-              memory: 2Gi
-              cpu: 1
       containers:
         - name: chatbot
           image: backend:latest
@@ -91,6 +77,8 @@ spec:
           volumeMounts:
             - name: chroma-storage
               mountPath: /app/data/chroma_shipping_db
+            - name: model-cache
+              mountPath: /cache
           resources:
             requests:
               memory: 512Mi
@@ -111,12 +99,12 @@ spec:
             initialDelaySeconds: 30
             periodSeconds: 15
       volumes:
-        - name: csv-storage
-          persistentVolumeClaim:
-            claimName: csv-pvc
         - name: chroma-storage
           persistentVolumeClaim:
             claimName: chroma-pvc
+        - name: model-cache
+          persistentVolumeClaim:
+            claimName: model-cache-pvc
 ---
 apiVersion: apps/v1
 kind: Deployment
@@ -145,9 +133,29 @@ spec:
             - "8001"
           ports:
             - containerPort: 8001
-          volumeMounts:
-            - name: csv-storage
-              mountPath: /app/data/csv
+          env:
+            - name: DATABASE_URL
+              valueFrom:
+                secretKeyRef:
+                  name: database-url
+                  key: url
+            - name: KAFKA_BOOTSTRAP_SERVERS
+              valueFrom:
+                secretKeyRef:
+                  name: kafka-credentials
+                  key: bootstrap-servers
+            - name: KAFKA_SASL_USERNAME
+              valueFrom:
+                secretKeyRef:
+                  name: kafka-credentials
+                  key: sasl-username
+            - name: KAFKA_SASL_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: kafka-credentials
+                  key: sasl-password
+            - name: KAFKA_TOPIC_PRODUCT_INGEST
+              value: product-ingest
           resources:
             requests:
               memory: 512Mi
@@ -167,7 +175,3 @@ spec:
               port: 8001
             initialDelaySeconds: 15
             periodSeconds: 15
-      volumes:
-        - name: csv-storage
-          persistentVolumeClaim:
-            claimName: csv-pvc

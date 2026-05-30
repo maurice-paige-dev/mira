@@ -1,0 +1,52 @@
+apiVersion: batch/v1
+kind: CronJob
+metadata:
+  name: chroma-aggregator
+  namespace: ecommerce
+spec:
+  schedule: "0 3 * * *"
+  concurrencyPolicy: Forbid
+  startingDeadlineSeconds: 120
+  jobTemplate:
+    spec:
+      backoffLimit: 2
+      ttlSecondsAfterFinished: 86400
+      template:
+        spec:
+          restartPolicy: OnFailure
+          containers:
+            - name: aggregator
+              image: backend:latest
+              command:
+                - python
+                - -m
+                - backend.aggregator
+              env:
+                - name: DATABASE_URL
+                  valueFrom:
+                    secretKeyRef:
+                      name: database-url
+                      key: url
+                - name: CHROMA_DB_PATH
+                  value: /app/data/chroma_shipping_db
+                - name: SENTENCE_TRANSFORMERS_HOME
+                  value: /cache
+              volumeMounts:
+                - name: chroma-storage
+                  mountPath: /app/data/chroma_shipping_db
+                - name: model-cache
+                  mountPath: /cache
+              resources:
+                requests:
+                  memory: 1Gi
+                  cpu: 500m
+                limits:
+                  memory: 2Gi
+                  cpu: 2
+          volumes:
+            - name: chroma-storage
+              persistentVolumeClaim:
+                claimName: chroma-pvc
+            - name: model-cache
+              persistentVolumeClaim:
+                claimName: model-cache-pvc

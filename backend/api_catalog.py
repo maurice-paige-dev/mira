@@ -1,217 +1,47 @@
-import pandas as pd
-import json
+import os
 import math
 from pathlib import Path
-from typing import Optional
 from contextlib import asynccontextmanager
 
 import uvicorn
 from fastapi import FastAPI, HTTPException, Query
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import HTMLResponse, JSONResponse, FileResponse
-from fastapi.staticfiles import StaticFiles
+from fastapi.responses import HTMLResponse
 from pydantic import BaseModel
 
+from backend.api_upload import router as upload_router
+from backend.db.migrations import create_tables
+from backend.db.repository import (
+    get_session,
+    get_products,
+    get_categories,
+    get_product_by_name,
+    get_shipping_cost,
+)
+
 BASE = Path(__file__).resolve().parent.parent
-CSV_DIR = BASE / "data" / "csv"
 STATIC_DIR = BASE / "frontend" / "catalog"
-
-inventory_df: Optional[pd.DataFrame] = None
-inventory_cat_df: Optional[pd.DataFrame] = None
-shipping_df: Optional[pd.DataFrame] = None
-purchase_df: Optional[pd.DataFrame] = None
+DATABASE_URL = os.environ.get("DATABASE_URL", "")
 
 
-def load_data():
-    global inventory_df, inventory_cat_df, shipping_df, purchase_df
-
-    inv_path = CSV_DIR / "inventory_monthly.csv"
-    inv_cat_path = CSV_DIR / "inventory_monthly_category.csv"
-    ship_path = CSV_DIR / "shipping_orders.csv"
-    po_path = CSV_DIR / "PurchaseOrders.csv"
-
-    if inv_path.exists():
-        inventory_df = pd.read_csv(inv_path)
-        print(f"  Loaded inventory_monthly.csv: {len(inventory_df)} rows")
-    if inv_cat_path.exists():
-        inventory_cat_df = pd.read_csv(inv_cat_path)
-        print(f"  Loaded inventory_monthly_category.csv: {len(inventory_cat_df)} rows")
-    if ship_path.exists():
-        shipping_df = pd.read_csv(ship_path)
-        print(f"  Loaded shipping_orders.csv: {len(shipping_df)} rows")
-    if po_path.exists():
-        purchase_df = pd.read_csv(po_path)
-        print(f"  Loaded PurchaseOrders.csv: {len(purchase_df)} rows")
-
-
-def get_consolidated_inventory() -> pd.DataFrame:
-    cat_data = None
-    if inventory_cat_df is not None and not inventory_cat_df.empty:
-        df = inventory_cat_df.copy()
-        if "Category ID" in df.columns and "Category" in df.columns:
-            cat_map = df[["Category ID", "Category"]].drop_duplicates().set_index("Category ID")["Category"].to_dict()
-            df = df.rename(columns={
-                "Category ID": "category_id",
-                "Category": "category",
-                "Product Name": "product_name",
-                "Units Sold": "units_sold",
-                "Units in Stock": "units_in_stock",
-                "Unit Price": "unit_price",
-                "Report Period": "report_period",
-            })
-            cat_data = df
-
-    monthly_data = None
-    if inventory_df is not None and not inventory_df.empty:
-        df = inventory_df.copy()
-        col_map = {
-            "Source File": "source_file",
-            "Report Period": "report_period",
-            "Category": "category",
-            "Product Name": "product_name",
-            "Units Sold": "units_sold",
-            "Units in Stock": "units_in_stock",
-            "Unit Price": "unit_price",
-        }
-        rename_dict = {k: v for k, v in col_map.items() if k in df.columns}
-        df = df.rename(columns=rename_dict)
-
-        for col in ["unit_price", "units_sold", "units_in_stock"]:
-            if col in df.columns:
-                df[col] = pd.to_numeric(df[col], errors="coerce")
-
-        before = len(df)
-        df = df.dropna(subset=["product_name", "units_sold", "units_in_stock", "unit_price"])
-        if before > len(df):
-            print(f"  [WARN] Dropped {before - len(df)} corrupted rows from inventory_monthly.csv")
-
-        if "product_name" in df.columns:
-            df = df[df["product_name"].str.len() >= 3]
-            df = df[df["product_name"].str.contains(r"^[A-Za-z0-9 \.\-'À-ÿ]+$", na=False)]
-            df = df[~df["product_name"].str.contains(r"^\d+$", na=False)]
-
-        if not df.empty:
-            monthly_data = df
-
-    records = []
-
-    used_products = set()
-    if cat_data is not None and not cat_data.empty:
-        for _, row in cat_data.iterrows():
-            pname = str(row.get("product_name", "")).strip()
-            if not pname or pname == "nan":
-                continue
-            used_products.add(pname.lower())
-            records.append({
-                "product_name": pname,
-                "category": str(row.get("category", "Uncategorized")).strip(),
-                "category_id": int(row.get("category_id", 0)) if pd.notna(row.get("category_id")) else 0,
-                "unit_price": float(row.get("unit_price", 0)),
-                "units_in_stock": int(row.get("units_in_stock", 0)),
-                "units_sold": int(row.get("units_sold", 0)),
-                "report_period": str(row.get("report_period", "")).strip(),
-            })
-
-    if monthly_data is not None and not monthly_data.empty:
-        for _, row in monthly_data.iterrows():
-            pname = str(row.get("product_name", "")).strip()
-            if not pname or pname == "nan":
-                continue
-            if pname.lower() in used_products:
-                continue
-            used_products.add(pname.lower())
-            records.append({
-                "product_name": pname,
-                "category": str(row.get("category", "Uncategorized")).strip(),
-                "category_id": 0,
-                "unit_price": float(row.get("unit_price", 0)),
-                "units_in_stock": int(row.get("units_in_stock", 0)),
-                "units_sold": int(row.get("units_sold", 0)),
-                "report_period": str(row.get("report_period", "")).strip(),
-            })
-
-    result = pd.DataFrame(records)
-    if result.empty:
-        return result
-
-    result["report_sort"] = result["report_period"].astype(str)
-    result = result.sort_values("report_sort", ascending=False)
-    result = result.drop_duplicates(subset=["product_name"], keep="first").reset_index(drop=True)
-    result = result.drop(columns=["report_sort"])
-
-    result["category"] = result["category"].fillna("Uncategorized")
-    valid_categories = {
-        "Beverages", "Condiments", "Confections", "Dairy Products",
-        "Grains/Cereals", "Meat/Poultry", "Produce", "Seafood", "Uncategorized",
-    }
-    result.loc[~result["category"].isin(valid_categories), "category"] = "Uncategorized"
-
-    return result
-
-
-def get_categories() -> list:
-    inv = get_consolidated_inventory()
-    if inv.empty:
-        return []
-    cats = inv.groupby("category").agg(
-        product_count=("product_name", "nunique"),
-        total_stock=("units_in_stock", "sum"),
-        avg_price=("unit_price", "mean"),
-    ).reset_index()
-    return cats.to_dict(orient="records")
-
-
-def estimate_shipping_cost(product_name: str, quantity: int, destination_country: str = "") -> dict:
-    if shipping_df is None or shipping_df.empty:
-        return {"estimated_shipping": 0, "notes": "No shipping data available", "shipper": "Unknown"}
-
-    prod_ship = shipping_df[shipping_df["Product Name"].str.strip().str.lower() == product_name.strip().lower()]
-
-    if prod_ship.empty:
-        avg_shipping = shipping_df["Total Price"].mean()
-        return {
-            "estimated_shipping": round(avg_shipping, 2),
-            "notes": "Estimated from overall average shipping cost",
-            "shipper": "Average across all shippers",
-        }
-
-    prod_ship = prod_ship.copy()
-    prod_ship["unit_shipping"] = prod_ship["Total Price"] / prod_ship["Quantity"].clip(lower=1)
-
-    avg_unit_shipping = prod_ship["unit_shipping"].mean()
-    most_common_shipper = prod_ship["Shipper Name"].mode().iloc[0] if not prod_ship["Shipper Name"].mode().empty else "Unknown"
-
-    dest_adjustment = 1.0
-    if destination_country:
-        dest_ship = prod_ship[prod_ship["Ship Country"].str.lower() == destination_country.lower()]
-        if not dest_ship.empty:
-            dest_avg = (dest_ship["Total Price"] / dest_ship["Quantity"].clip(lower=1)).mean()
-            dest_adjustment = dest_avg / avg_unit_shipping if avg_unit_shipping > 0 else 1.0
-
-    total_shipping = avg_unit_shipping * quantity * dest_adjustment
-
-    return {
-        "estimated_shipping": round(total_shipping, 2),
-        "notes": f"Based on historical data for {product_name} via {most_common_shipper}",
-        "shipper": most_common_shipper,
-        "avg_unit_shipping": round(avg_unit_shipping, 2),
-        "destination_adjustment": round(dest_adjustment, 2),
-        "historical_records": len(prod_ship),
-    }
+def _get_db():
+    return get_session(DATABASE_URL)
 
 
 @asynccontextmanager
-async def lifespan(app: FastAPI):
-    print("Loading data \u2026")
-    load_data()
-    print("Ready!")
+async def lifespan(application: FastAPI):
+    if DATABASE_URL:
+        create_tables(DATABASE_URL)
+        print("Catalog API — database tables ready")
+    else:
+        print("Catalog API — no DATABASE_URL, running without persistence")
     yield
 
 
 app = FastAPI(
     title="Product Catalog & Quoting System",
     description="Browse products and get purchase + shipping quotes",
-    version="1.0.0",
+    version="2.0.0",
     lifespan=lifespan,
 )
 
@@ -223,8 +53,11 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
+app.include_router(upload_router)
+
 
 if STATIC_DIR.exists():
+    from fastapi.staticfiles import StaticFiles
     app.mount("/static", StaticFiles(directory=str(STATIC_DIR)), name="static")
 
 
@@ -234,6 +67,71 @@ def index():
     if html_path.exists():
         return HTMLResponse(content=html_path.read_text(encoding="utf-8"))
     return HTMLResponse(content="<h1>Frontend not found</h1>", status_code=404)
+
+
+@app.get("/api/products")
+def list_products(
+    category: str = Query("", description="Filter by category"),
+    search: str = Query("", description="Search product names"),
+    in_stock_only: bool = Query(False, description="Only show products in stock"),
+    page: int = Query(1, ge=1),
+    per_page: int = Query(50, ge=1, le=200),
+):
+    if not DATABASE_URL:
+        raise HTTPException(status_code=503, detail="Database not configured")
+
+    session = _get_db()
+    try:
+        products = get_products(
+            session,
+            category=category or None,
+            search=search or None,
+            in_stock_only=in_stock_only,
+        )
+    finally:
+        session.close()
+
+    all_categories = sorted(set(p["category"] for p in products if p["category"])) if products else []
+    total = len(products)
+    start = (page - 1) * per_page
+    page_data = products[start:start + per_page]
+
+    return {
+        "products": page_data,
+        "total": total,
+        "page": page,
+        "per_page": per_page,
+        "categories": all_categories,
+    }
+
+
+@app.get("/api/categories")
+def list_categories():
+    if not DATABASE_URL:
+        raise HTTPException(status_code=503, detail="Database not configured")
+
+    session = _get_db()
+    try:
+        cats = get_categories(session)
+    finally:
+        session.close()
+    return {"categories": cats}
+
+
+@app.get("/api/products/{product_name}")
+def product_detail(product_name: str):
+    if not DATABASE_URL:
+        raise HTTPException(status_code=503, detail="Database not configured")
+
+    session = _get_db()
+    try:
+        product = get_product_by_name(session, product_name)
+    finally:
+        session.close()
+
+    if not product:
+        raise HTTPException(status_code=404, detail=f"Product '{product_name}' not found")
+    return product
 
 
 class QuoteLineItem(BaseModel):
@@ -255,103 +153,32 @@ class QuoteResponse(BaseModel):
     notes: list[str]
 
 
-@app.get("/api/products")
-def list_products(
-    category: str = Query("", description="Filter by category"),
-    search: str = Query("", description="Search product names"),
-    in_stock_only: bool = Query(False, description="Only show products in stock"),
-    page: int = Query(1, ge=1),
-    per_page: int = Query(50, ge=1, le=200),
-):
-    inv = get_consolidated_inventory()
-    if inv.empty:
-        return {"products": [], "total": 0, "page": page, "per_page": per_page, "categories": []}
-
-    if category:
-        inv = inv[inv["category"].str.lower() == category.lower()]
-    if search:
-        inv = inv[inv["product_name"].str.lower().str.contains(search.lower(), na=False)]
-    if in_stock_only:
-        inv = inv[inv["units_in_stock"] > 0]
-
-    total = len(inv)
-    categories = sorted(inv["category"].unique().tolist())
-
-    start = (page - 1) * per_page
-    end = start + per_page
-    page_data = inv.iloc[start:end]
-
-    products = []
-    for _, row in page_data.iterrows():
-        prod = {
-            "product_name": row.get("product_name", ""),
-            "category": row.get("category", ""),
-            "unit_price": float(row.get("unit_price", 0)),
-            "units_in_stock": int(row.get("units_in_stock", 0)),
-            "units_sold": int(row.get("units_sold", 0)),
-            "report_period": str(row.get("report_period", "")),
-            "in_stock": int(row.get("units_in_stock", 0)) > 0,
-        }
-        products.append(prod)
-
-    return {
-        "products": products,
-        "total": total,
-        "page": page,
-        "per_page": per_page,
-        "categories": categories,
-    }
-
-
-@app.get("/api/categories")
-def list_categories():
-    return {"categories": get_categories()}
-
-
-@app.get("/api/products/{product_name}")
-def product_detail(product_name: str):
-    inv = get_consolidated_inventory()
-    if inv.empty:
-        raise HTTPException(status_code=404, detail="No inventory data")
-
-    match = inv[inv["product_name"].str.lower() == product_name.lower()]
-    if match.empty:
-        raise HTTPException(status_code=404, detail=f"Product '{product_name}' not found")
-
-    row = match.iloc[0]
-    return {
-        "product_name": row.get("product_name", ""),
-        "category": row.get("category", ""),
-        "category_id": int(row.get("category_id", 0)),
-        "unit_price": float(row.get("unit_price", 0)),
-        "units_in_stock": int(row.get("units_in_stock", 0)),
-        "units_sold": int(row.get("units_sold", 0)),
-        "report_period": str(row.get("report_period", "")),
-        "in_stock": int(row.get("units_in_stock", 0)) > 0,
-    }
-
-
 @app.post("/api/quote", response_model=QuoteResponse)
 def generate_quote(req: QuoteRequest):
-    inv = get_consolidated_inventory()
-    if inv.empty:
-        raise HTTPException(status_code=400, detail="No inventory data available")
+    if not DATABASE_URL:
+        raise HTTPException(status_code=503, detail="Database not configured")
 
+    session = _get_db()
+    try:
+        all_products = get_products(session)
+    finally:
+        session.close()
+
+    prod_map = {p["product_name"].lower(): p for p in all_products}
     line_items = []
     subtotal_product = 0.0
     total_shipping = 0.0
     notes = []
 
     for item in req.items:
-        match = inv[inv["product_name"].str.lower() == item.product_name.strip().lower()]
-
-        if match.empty:
-            notes.append(f"\u26a0 Product '{item.product_name}' not found in catalog. Skipped.")
+        key = item.product_name.strip().lower()
+        match = prod_map.get(key)
+        if not match:
+            notes.append(f"Product '{item.product_name}' not found in catalog. Skipped.")
             continue
 
-        row = match.iloc[0]
-        unit_price = float(row.get("unit_price", 0))
-        stock = int(row.get("units_in_stock", 0))
+        unit_price = float(match.get("unit_price", 0))
+        stock = int(match.get("units_in_stock", 0))
         qty = max(item.quantity, 1)
 
         stock_status = "in_stock"
@@ -359,19 +186,17 @@ def generate_quote(req: QuoteRequest):
         if stock <= 0:
             stock_status = "out_of_stock"
             stock_warning = "OUT OF STOCK"
-            notes.append(f"\u26a0 {item.product_name} is currently out of stock.")
+            notes.append(f"{item.product_name} is currently out of stock.")
         elif qty > stock:
             stock_status = "limited"
             stock_warning = f"Only {stock} in stock"
-            notes.append(f"\u26a0 Only {stock} units of {item.product_name} available (requested {qty}).")
+            notes.append(f"Only {stock} units of {item.product_name} available (requested {qty}).")
 
         line_product_total = round(unit_price * qty, 2)
         subtotal_product += line_product_total
 
-        ship_estimate = estimate_shipping_cost(
-            item.product_name, qty, req.destination_country
-        )
-        line_shipping = ship_estimate["estimated_shipping"]
+        ship = _estimate_shipping(session, item.product_name, qty, req.destination_country)
+        line_shipping = ship["estimated_shipping"]
         total_shipping += line_shipping
 
         line_items.append({
@@ -380,14 +205,13 @@ def generate_quote(req: QuoteRequest):
             "unit_price": unit_price,
             "line_total": line_product_total,
             "estimated_shipping": line_shipping,
-            "shipper": ship_estimate.get("shipper", "Unknown"),
+            "shipper": ship.get("shipper", "Unknown"),
             "stock_status": stock_status,
             "stock_warning": stock_warning,
-            "shipping_note": ship_estimate.get("notes", ""),
+            "shipping_note": ship.get("notes", ""),
         })
 
     grand_total = round(subtotal_product + total_shipping, 2)
-
     if not line_items:
         raise HTTPException(status_code=400, detail="No valid products found in quote request.")
 
@@ -400,14 +224,43 @@ def generate_quote(req: QuoteRequest):
     )
 
 
+def _estimate_shipping(session, product_name: str, quantity: int, destination: str) -> dict:
+    try:
+        records = get_shipping_cost(session, product_name)
+    except Exception:
+        records = []
+
+    if not records:
+        return {
+            "estimated_shipping": 0.0,
+            "notes": "No shipping data available",
+            "shipper": "Unknown",
+        }
+
+    avg_unit = sum(r["total_price"] / max(r["quantity"], 1) for r in records) / len(records)
+    common_shipper = max(set(r["shipper_name"] for r in records), key=lambda s: sum(1 for r in records if r["shipper_name"] == s))
+
+    dest_adjustment = 1.0
+    if destination:
+        dest_records = [r for r in records if r["ship_country"].lower() == destination.lower()]
+        if dest_records:
+            dest_avg = sum(r["total_price"] / max(r["quantity"], 1) for r in dest_records) / len(dest_records)
+            dest_adjustment = dest_avg / avg_unit if avg_unit > 0 else 1.0
+
+    total = avg_unit * quantity * dest_adjustment
+    return {
+        "estimated_shipping": round(total, 2),
+        "notes": f"Based on historical data for {product_name} via {common_shipper}",
+        "shipper": common_shipper,
+        "avg_unit_shipping": round(avg_unit, 2),
+        "destination_adjustment": round(dest_adjustment, 2),
+        "historical_records": len(records),
+    }
+
+
 @app.get("/api/health")
 def health():
-    return {
-        "status": "ok",
-        "inventory_rows_loaded": len(inventory_df) if inventory_df is not None else 0,
-        "inventory_cat_rows_loaded": len(inventory_cat_df) if inventory_cat_df is not None else 0,
-        "shipping_rows_loaded": len(shipping_df) if shipping_df is not None else 0,
-    }
+    return {"status": "ok", "database_url_configured": bool(DATABASE_URL)}
 
 
 if __name__ == "__main__":

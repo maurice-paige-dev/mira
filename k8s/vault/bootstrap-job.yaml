@@ -103,8 +103,9 @@ spec:
               vault secrets enable -path=secret kv-v2 2>/dev/null || true
 
               echo "Writing application secrets..."
-              vault kv put secret/ecommerce/postgres username=products password=changeme
+              vault kv put secret/ecommerce/postgres username=products password=changeme database-url="postgresql://products:changeme@postgres:5432/products"
               vault kv put secret/ecommerce/minio access-key=minioadmin secret-key=minioadmin
+              vault kv put secret/ecommerce/kafka bootstrap-servers="localhost:9092" sasl-username="" sasl-password=""
 
               echo "Enabling Kubernetes auth..."
               vault auth enable kubernetes 2>/dev/null || true
@@ -118,6 +119,9 @@ spec:
               vault policy write ecommerce - << 'POL'
               path "secret/data/ecommerce/*" {
                 capabilities = ["read"]
+              }
+              path "secret/metadata/ecommerce/*" {
+                capabilities = ["list"]
               }
               POL
 
