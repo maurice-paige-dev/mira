@@ -48,6 +48,11 @@ def parse_args(argv=None):
     watch_opts.add_argument("--interval", type=int, default=5,
                             help="Poll interval in seconds (default: 5)")
 
+    # ── deployment options ──
+    deploy = parser.add_argument_group("Prefect deployment options")
+    deploy.add_argument("--deploy", action="store_true",
+                        help="Create a Prefect deployment with a schedule")
+
     # ── pipeline options ──
     pipeline = parser.add_argument_group("pipeline options")
     pipeline.add_argument("--target", "-t", type=str, default="inventory", choices=TARGETS,
@@ -61,6 +66,22 @@ def parse_args(argv=None):
 
 def main():
     args = parse_args()
+
+    # ── Prefect deployment ────────────────────────────────
+    if args.deploy:
+        import backend.orchestrator as orch
+        orch.run_pipeline.serve(
+            name="mlops-ingestion-pipeline",
+            cron="* * * * *",           # every minute
+            tags=["mlops", "ingestion"],
+            parameters={
+                "file_path": None,
+                "target": args.target,
+                "rebuild_rag": not args.no_rag,
+                "dry_run": args.dry_run,
+            },
+        )
+        return
 
     # ── Watch mode ──────────────────────────────────────────
     if args.watch:

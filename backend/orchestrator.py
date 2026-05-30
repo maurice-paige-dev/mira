@@ -11,12 +11,15 @@ Coordinates the data conversion agents:
 
 from pathlib import Path
 
+from prefect import flow
+
 from backend.agents import ingestion_agent, transformation_agent, quality_agent, integration_agent
 
 
 PIPELINE_STEPS = ["ingest", "transform", "validate", "integrate"]
 
 
+@flow(log_prints=True)
 def run_pipeline(
     file_path: Path | None = None,
     target: str = "inventory",
@@ -124,6 +127,7 @@ def run_pipeline(
     return report
 
 
+@flow(log_prints=True)
 def run_all(rebuild_rag: bool = True, dry_run: bool = False) -> list[dict]:
     """Run the pipeline on every file in the ingest directory."""
     files = ingestion_agent.discover_new_files()

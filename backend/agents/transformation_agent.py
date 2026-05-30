@@ -12,6 +12,8 @@ import csv
 from pathlib import Path
 from io import StringIO
 
+from prefect import task
+
 from backend.agents.schema_config import TARGETS
 
 
@@ -24,6 +26,7 @@ def _match_field(input_field: str, candidates: list[str]) -> bool:
     )
 
 
+@task(retries=1, retry_delay_seconds=5)
 def transform(rows: list[dict], target_key: str) -> list[dict]:
     """
     Transform a list of input records into the target schema.

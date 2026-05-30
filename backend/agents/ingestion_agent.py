@@ -11,6 +11,8 @@ import json
 from pathlib import Path
 from datetime import datetime
 
+from prefect import task
+
 BASE = Path(__file__).resolve().parent.parent.parent
 INGEST_DIR = BASE / "data" / "ingest"
 PROCESSED_DIR = INGEST_DIR / "processed"
@@ -94,6 +96,7 @@ def move_to_processed(file_path: Path) -> Path:
     return dest
 
 
+@task(retries=2, retry_delay_seconds=10)
 def ingest(file_path: Path) -> list[dict]:
     """Full ingestion: parse + tag, then archive the file."""
     rows = parse_file(file_path)

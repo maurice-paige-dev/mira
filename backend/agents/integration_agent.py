@@ -11,6 +11,8 @@ import subprocess
 import sys
 from pathlib import Path
 
+from prefect import task
+
 from backend.agents.schema_config import TARGETS
 
 BASE = Path(__file__).resolve().parent.parent.parent
@@ -36,6 +38,7 @@ def append_to_csv(rows: list[dict], target_key: str) -> Path:
     return csv_path
 
 
+@task
 def rebuild_vector_store() -> bool:
     """Run the vector store builder to incorporate new data into ChromaDB."""
     print("  [integrate] Rebuilding ChromaDB vector store \u2026")
@@ -61,6 +64,7 @@ def rebuild_vector_store() -> bool:
         return False
 
 
+@task(retries=1, retry_delay_seconds=30)
 def integrate(rows: list[dict], target_key: str, rebuild_rag: bool = True) -> dict:
     """Append to CSV and optionally rebuild the RAG vector store."""
     csv_path = append_to_csv(rows, target_key)

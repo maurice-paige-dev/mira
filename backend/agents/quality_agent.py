@@ -5,6 +5,8 @@ Validates transformed records against schema rules before they are
 committed to the CSV store.
 """
 
+from prefect import task
+
 from backend.agents.schema_config import TARGETS
 
 
@@ -73,6 +75,7 @@ def validate(rows: list[dict], target_key: str) -> list[dict]:
     return errors
 
 
+@task
 def quality_report(rows: list[dict], target_key: str) -> dict:
     """Run validation and return a structured pass/fail report."""
     errors = validate(rows, target_key)
