@@ -1,0 +1,976 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Product Catalog & Quoting System</title>
+<style>
+  :root {
+    --primary: #2563eb;
+    --primary-dark: #1d4ed8;
+    --success: #16a34a;
+    --warning: #d97706;
+    --danger: #dc2626;
+    --gray-50: #f9fafb;
+    --gray-100: #f3f4f6;
+    --gray-200: #e5e7eb;
+    --gray-300: #d1d5db;
+    --gray-400: #9ca3af;
+    --gray-500: #6b7280;
+    --gray-600: #4b5563;
+    --gray-700: #374151;
+    --gray-800: #1f2937;
+    --gray-900: #111827;
+    --shadow: 0 1px 3px rgba(0,0,0,0.1), 0 1px 2px rgba(0,0,0,0.06);
+    --shadow-lg: 0 10px 15px -3px rgba(0,0,0,0.1), 0 4px 6px -2px rgba(0,0,0,0.05);
+    --radius: 8px;
+  }
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  body {
+    font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, 'Helvetica Neue', Arial, sans-serif;
+    background: var(--gray-50);
+    color: var(--gray-900);
+    line-height: 1.6;
+  }
+
+  /* Header */
+  .header {
+    background: linear-gradient(135deg, var(--primary), #1e40af);
+    color: white;
+    padding: 16px 24px;
+    box-shadow: var(--shadow);
+    position: sticky;
+    top: 0;
+    z-index: 100;
+  }
+  .header-content {
+    max-width: 1400px;
+    margin: 0 auto;
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    flex-wrap: wrap;
+    gap: 12px;
+  }
+  .header h1 {
+    font-size: 1.4rem;
+    font-weight: 700;
+    display: flex;
+    align-items: center;
+    gap: 8px;
+  }
+  .header nav { display: flex; gap: 8px; }
+  .header nav button {
+    background: rgba(255,255,255,0.15);
+    color: white;
+    border: 1px solid rgba(255,255,255,0.3);
+    padding: 8px 16px;
+    border-radius: var(--radius);
+    cursor: pointer;
+    font-size: 0.9rem;
+    transition: all 0.2s;
+  }
+  .header nav button:hover, .header nav button.active {
+    background: rgba(255,255,255,0.25);
+  }
+  .header nav button.active {
+    border-color: white;
+    font-weight: 600;
+  }
+
+  /* Layout */
+  .container { max-width: 1400px; margin: 0 auto; padding: 20px 24px; }
+  .page { display: none; }
+  .page.active { display: block; }
+
+  /* Cards */
+  .card {
+    background: white;
+    border-radius: var(--radius);
+    box-shadow: var(--shadow);
+    overflow: hidden;
+  }
+  .card-header {
+    padding: 16px 20px;
+    border-bottom: 1px solid var(--gray-200);
+    font-weight: 600;
+    font-size: 1.1rem;
+    background: var(--gray-50);
+  }
+  .card-body { padding: 20px; }
+
+  /* Stats Grid */
+  .stats-grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
+    gap: 16px;
+    margin-bottom: 24px;
+  }
+  .stat-card {
+    background: white;
+    border-radius: var(--radius);
+    padding: 20px;
+    box-shadow: var(--shadow);
+    text-align: center;
+  }
+  .stat-card .value {
+    font-size: 2rem;
+    font-weight: 700;
+    color: var(--primary);
+  }
+  .stat-card .label {
+    font-size: 0.85rem;
+    color: var(--gray-500);
+    margin-top: 4px;
+  }
+
+  /* Filters */
+  .filters {
+    display: flex;
+    gap: 12px;
+    flex-wrap: wrap;
+    margin-bottom: 20px;
+    align-items: center;
+  }
+  .filters input, .filters select {
+    padding: 8px 12px;
+    border: 1px solid var(--gray-300);
+    border-radius: var(--radius);
+    font-size: 0.9rem;
+    background: white;
+  }
+  .filters input { flex: 1; min-width: 200px; }
+  .filters label {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    font-size: 0.9rem;
+    color: var(--gray-600);
+    cursor: pointer;
+  }
+
+  /* Table */
+  .table-wrap { overflow-x: auto; }
+  table {
+    width: 100%;
+    border-collapse: collapse;
+  }
+  th, td {
+    padding: 10px 14px;
+    text-align: left;
+    border-bottom: 1px solid var(--gray-200);
+    font-size: 0.9rem;
+  }
+  th {
+    background: var(--gray-50);
+    font-weight: 600;
+    color: var(--gray-600);
+    white-space: nowrap;
+    cursor: pointer;
+    user-select: none;
+  }
+  th:hover { color: var(--primary); }
+  tr:hover { background: var(--gray-50); }
+  .badge {
+    display: inline-block;
+    padding: 2px 8px;
+    border-radius: 12px;
+    font-size: 0.75rem;
+    font-weight: 600;
+  }
+  .badge-success { background: #dcfce7; color: #166534; }
+  .badge-warning { background: #fef3c7; color: #92400e; }
+  .badge-danger { background: #fce4ec; color: #c62828; }
+
+  /* Buttons */
+  .btn {
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+    padding: 8px 16px;
+    border: none;
+    border-radius: var(--radius);
+    font-size: 0.9rem;
+    cursor: pointer;
+    transition: all 0.2s;
+    text-decoration: none;
+  }
+  .btn-primary { background: var(--primary); color: white; }
+  .btn-primary:hover { background: var(--primary-dark); }
+  .btn-success { background: var(--success); color: white; }
+  .btn-success:hover { background: #15803d; }
+  .btn-danger { background: var(--danger); color: white; }
+  .btn-danger:hover { background: #b91c1c; }
+  .btn-outline {
+    background: transparent;
+    border: 1px solid var(--gray-300);
+    color: var(--gray-700);
+  }
+  .btn-outline:hover { background: var(--gray-100); }
+  .btn-sm { padding: 4px 10px; font-size: 0.8rem; }
+
+  /* Pagination */
+  .pagination {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    gap: 8px;
+    padding: 16px 0;
+  }
+  .pagination button {
+    padding: 6px 12px;
+    border: 1px solid var(--gray-300);
+    border-radius: var(--radius);
+    background: white;
+    cursor: pointer;
+  }
+  .pagination button:disabled {
+    opacity: 0.5;
+    cursor: not-allowed;
+  }
+  .pagination button:not(:disabled):hover { background: var(--gray-100); }
+  .pagination span { color: var(--gray-500); font-size: 0.9rem; }
+
+  /* Quote Builder */
+  .quote-builder {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 24px;
+  }
+  @media (max-width: 900px) { .quote-builder { grid-template-columns: 1fr; } }
+
+  .quote-products-list {
+    max-height: 500px;
+    overflow-y: auto;
+  }
+  .quote-product-item {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    padding: 8px 0;
+    border-bottom: 1px solid var(--gray-200);
+    gap: 8px;
+  }
+  .quote-product-item .info {
+    flex: 1;
+    min-width: 0;
+  }
+  .quote-product-item .name {
+    font-weight: 500;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+  }
+  .quote-product-item .meta {
+    font-size: 0.8rem;
+    color: var(--gray-500);
+  }
+  .quote-product-item .qty-input {
+    width: 60px;
+    padding: 4px 8px;
+    border: 1px solid var(--gray-300);
+    border-radius: 4px;
+    text-align: center;
+  }
+  .quote-product-item .add-btn {
+    padding: 4px 12px;
+    background: var(--primary);
+    color: white;
+    border: none;
+    border-radius: 4px;
+    cursor: pointer;
+    font-size: 0.8rem;
+  }
+  .quote-product-item .add-btn:hover { background: var(--primary-dark); }
+
+  /* Quote Summary */
+  .quote-summary { position: sticky; top: 80px; }
+  .quote-cart-item {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    padding: 8px 0;
+    border-bottom: 1px solid var(--gray-200);
+    font-size: 0.9rem;
+  }
+  .quote-cart-item .remove-btn {
+    color: var(--danger);
+    cursor: pointer;
+    background: none;
+    border: none;
+    font-size: 1.1rem;
+  }
+  .quote-total-row {
+    display: flex;
+    justify-content: space-between;
+    padding: 8px 0;
+    font-size: 0.95rem;
+  }
+  .quote-total-row.grand {
+    font-size: 1.2rem;
+    font-weight: 700;
+    border-top: 2px solid var(--gray-800);
+    padding-top: 12px;
+    margin-top: 8px;
+  }
+
+  /* Quote Result Modal */
+  .modal-overlay {
+    display: none;
+    position: fixed;
+    top: 0; left: 0; right: 0; bottom: 0;
+    background: rgba(0,0,0,0.5);
+    z-index: 1000;
+    align-items: center;
+    justify-content: center;
+  }
+  .modal-overlay.open { display: flex; }
+  .modal {
+    background: white;
+    border-radius: var(--radius);
+    max-width: 700px;
+    width: 90%;
+    max-height: 90vh;
+    overflow-y: auto;
+    box-shadow: var(--shadow-lg);
+  }
+  .modal-header {
+    padding: 16px 20px;
+    border-bottom: 1px solid var(--gray-200);
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+  }
+  .modal-header h2 { font-size: 1.2rem; }
+  .modal-close {
+    background: none;
+    border: none;
+    font-size: 1.5rem;
+    cursor: pointer;
+    color: var(--gray-500);
+  }
+  .modal-body { padding: 20px; }
+  .modal-footer {
+    padding: 16px 20px;
+    border-top: 1px solid var(--gray-200);
+    display: flex;
+    justify-content: flex-end;
+    gap: 8px;
+  }
+
+  /* Loading */
+  .loading {
+    text-align: center;
+    padding: 40px;
+    color: var(--gray-500);
+  }
+  .loading::after {
+    content: '';
+    display: inline-block;
+    width: 24px;
+    height: 24px;
+    border: 3px solid var(--gray-200);
+    border-top-color: var(--primary);
+    border-radius: 50%;
+    animation: spin 0.6s linear infinite;
+    margin-left: 8px;
+    vertical-align: middle;
+  }
+  @keyframes spin { to { transform: rotate(360deg); } }
+
+  .empty-state {
+    text-align: center;
+    padding: 40px;
+    color: var(--gray-400);
+  }
+  .empty-state h3 { margin-bottom: 8px; color: var(--gray-500); }
+
+  .notification {
+    position: fixed;
+    top: 16px;
+    right: 16px;
+    padding: 12px 20px;
+    border-radius: var(--radius);
+    color: white;
+    font-size: 0.9rem;
+    z-index: 2000;
+    animation: slideIn 0.3s ease;
+    box-shadow: var(--shadow-lg);
+  }
+  .notification.success { background: var(--success); }
+  .notification.warning { background: var(--warning); }
+  .notification.error { background: var(--danger); }
+  @keyframes slideIn { from { transform: translateX(100%); opacity: 0; } to { transform: translateX(0); opacity: 1; } }
+
+  input.error { border-color: var(--danger); }
+  .error-text { color: var(--danger); font-size: 0.8rem; margin-top: 4px; }
+</style>
+</head>
+<body>
+
+<div class="header">
+  <div class="header-content">
+    <h1>📦 Product Catalog & Quoting</h1>
+    <nav>
+      <button class="active" onclick="showPage('catalog')" id="nav-catalog">📋 Catalog</button>
+      <button onclick="showPage('categories')" id="nav-categories">🏷️ Categories</button>
+      <button onclick="showPage('quote')" id="nav-quote">💰 Get Quote</button>
+    </nav>
+  </div>
+</div>
+
+<div class="container">
+
+  <!-- ========== CATALOG PAGE ========== -->
+  <div class="page active" id="page-catalog">
+    <div class="stats-grid" id="catalog-stats"></div>
+
+    <div class="card">
+      <div class="card-body">
+        <div class="filters">
+          <input type="text" id="search-input" placeholder="Search products..." oninput="debounceSearch()">
+          <select id="category-filter" onchange="loadProducts()">
+            <option value="">All Categories</option>
+          </select>
+          <label>
+            <input type="checkbox" id="in-stock-only" onchange="loadProducts()">
+            In Stock Only
+          </label>
+        </div>
+        <div class="table-wrap">
+          <table>
+            <thead>
+              <tr>
+                <th onclick="sortProducts('product_name')">Product Name</th>
+                <th onclick="sortProducts('category')">Category</th>
+                <th onclick="sortProducts('unit_price')">Unit Price</th>
+                <th onclick="sortProducts('units_in_stock')">Stock</th>
+                <th onclick="sortProducts('units_sold')">Sold</th>
+                <th>Status</th>
+                <th>Action</th>
+              </tr>
+            </thead>
+            <tbody id="product-tbody">
+              <tr><td colspan="7" class="loading">Loading products...</td></tr>
+            </tbody>
+          </table>
+        </div>
+        <div class="pagination" id="catalog-pagination"></div>
+      </div>
+    </div>
+  </div>
+
+  <!-- ========== CATEGORIES PAGE ========== -->
+  <div class="page" id="page-categories">
+    <div class="card">
+      <div class="card-header">📊 Product Categories</div>
+      <div class="card-body">
+        <div class="table-wrap">
+          <table>
+            <thead>
+              <tr>
+                <th>Category</th>
+                <th>Products</th>
+                <th>Total Stock</th>
+                <th>Avg Price</th>
+                <th>Action</th>
+              </tr>
+            </thead>
+            <tbody id="category-tbody">
+              <tr><td colspan="5" class="loading">Loading categories...</td></tr>
+            </tbody>
+          </table>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- ========== QUOTE PAGE ========== -->
+  <div class="page" id="page-quote">
+    <div class="quote-builder">
+      <!-- Left: Product browser for quote -->
+      <div class="card">
+        <div class="card-header">📦 Add Products to Quote</div>
+        <div class="card-body">
+          <div class="filters">
+            <input type="text" id="quote-search" placeholder="Search products..." oninput="debounceQuoteSearch()">
+            <select id="quote-category-filter" onchange="loadQuoteProducts()">
+              <option value="">All Categories</option>
+            </select>
+            <label>
+              <input type="checkbox" id="quote-in-stock" onchange="loadQuoteProducts()" checked>
+              In Stock
+            </label>
+          </div>
+          <div class="quote-products-list" id="quote-products-list">
+            <div class="loading">Loading products...</div>
+          </div>
+        </div>
+      </div>
+
+      <!-- Right: Quote summary -->
+      <div class="card quote-summary">
+        <div class="card-header">🧾 Quote Summary</div>
+        <div class="card-body">
+          <div class="filters">
+            <input type="text" id="quote-customer" placeholder="Customer name (optional)">
+            <input type="text" id="quote-destination" placeholder="Destination country (optional)">
+          </div>
+          <div id="quote-cart">
+            <div class="empty-state">
+              <h3>No items added</h3>
+              <p>Search and add products from the left panel.</p>
+            </div>
+          </div>
+          <div id="quote-totals" style="display:none;">
+            <div class="quote-total-row">
+              <span>Subtotal (Products):</span>
+              <span id="quote-subtotal">$0.00</span>
+            </div>
+            <div class="quote-total-row">
+              <span>Estimated Shipping:</span>
+              <span id="quote-shipping">$0.00</span>
+            </div>
+            <div class="quote-total-row grand">
+              <span>Grand Total:</span>
+              <span id="quote-grand-total">$0.00</span>
+            </div>
+          </div>
+          <div style="margin-top:16px;display:flex;gap:8px;">
+            <button class="btn btn-success" onclick="generateQuote()" id="quote-btn" disabled>💰 Get Quote</button>
+            <button class="btn btn-outline" onclick="clearQuote()">🗑️ Clear All</button>
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+
+</div>
+
+<!-- Quote Result Modal -->
+<div class="modal-overlay" id="quote-modal">
+  <div class="modal">
+    <div class="modal-header">
+      <h2>📄 Quote Result</h2>
+      <button class="modal-close" onclick="closeQuoteModal()">&times;</button>
+    </div>
+    <div class="modal-body" id="quote-modal-body">
+      <div class="loading">Generating quote...</div>
+    </div>
+    <div class="modal-footer">
+      <button class="btn btn-primary" onclick="printQuote()">🖨️ Print</button>
+      <button class="btn btn-outline" onclick="closeQuoteModal()">Close</button>
+    </div>
+  </div>
+</div>
+
+<script>
+// ── State ─────────────────────────────────────────────────
+let products = [];
+let totalProducts = 0;
+let currentPage = 1;
+let perPage = 50;
+let sortField = '';
+let sortDir = 'asc';
+let quoteItems = []; // { product_name, quantity, unit_price }
+let searchTimeout = null;
+
+// ── Utility ───────────────────────────────────────────────
+function showNotification(msg, type = 'success') {
+  const el = document.createElement('div');
+  el.className = `notification ${type}`;
+  el.textContent = msg;
+  document.body.appendChild(el);
+  setTimeout(() => el.remove(), 3000);
+}
+
+function formatPrice(n) {
+  return '$' + Number(n).toFixed(2);
+}
+
+function api(path, options = {}) {
+  return fetch('/api' + path, {
+    headers: { 'Content-Type': 'application/json' },
+    ...options,
+  }).then(r => {
+    if (!r.ok) return r.json().then(e => { throw new Error(e.detail || 'API Error'); });
+    return r.json();
+  });
+}
+
+// ── Navigation ────────────────────────────────────────────
+function showPage(name) {
+  document.querySelectorAll('.page').forEach(p => p.classList.remove('active'));
+  document.querySelectorAll('.header nav button').forEach(b => b.classList.remove('active'));
+  document.getElementById(`page-${name}`).classList.add('active');
+  document.getElementById(`nav-${name}`).classList.add('active');
+  if (name === 'catalog') loadProducts();
+  if (name === 'categories') loadCategories();
+  if (name === 'quote') { loadQuoteProducts(); loadQuoteCategories(); }
+}
+
+// ── Catalog Page ──────────────────────────────────────────
+function loadStats() {
+  api('/products?per_page=1').then(data => {
+    const total = data.total;
+    const cats = data.categories.length;
+    const inStock = data.products.filter(p => p.in_stock).length;
+    document.getElementById('catalog-stats').innerHTML = `
+      <div class="stat-card"><div class="value">${total}</div><div class="label">Total Products</div></div>
+      <div class="stat-card"><div class="value">${cats}</div><div class="label">Categories</div></div>
+      <div class="stat-card"><div class="value">${inStock}</div><div class="label">In Stock</div></div>
+    `;
+  }).catch(() => {});
+}
+
+function loadCategoriesFilter() {
+  api('/categories').then(data => {
+    const cats = data.categories || [];
+    const select = document.getElementById('category-filter');
+    select.innerHTML = '<option value="">All Categories</option>';
+    cats.forEach(c => {
+      select.innerHTML += `<option value="${c.category}">${c.category} (${c.product_count})</option>`;
+    });
+  }).catch(() => {});
+}
+
+function loadProducts() {
+  const search = document.getElementById('search-input').value;
+  const category = document.getElementById('category-filter').value;
+  const inStock = document.getElementById('in-stock-only').checked;
+
+  document.getElementById('product-tbody').innerHTML = '<tr><td colspan="7" class="loading">Loading...</td></tr>';
+
+  let url = `/products?page=${currentPage}&per_page=${perPage}`;
+  if (search) url += `&search=${encodeURIComponent(search)}`;
+  if (category) url += `&category=${encodeURIComponent(category)}`;
+  if (inStock) url += '&in_stock_only=true';
+  if (sortField) url += `&sort=${sortField}&dir=${sortDir}`;
+
+  api(url).then(data => {
+    products = data.products || [];
+    totalProducts = data.total;
+
+    const tbody = document.getElementById('product-tbody');
+    if (products.length === 0) {
+      tbody.innerHTML = '<tr><td colspan="7"><div class="empty-state"><h3>No products found</h3><p>Try changing your filters.</p></div></td></tr>';
+    } else {
+      tbody.innerHTML = products.map(p => {
+        let statusBadge = p.in_stock
+          ? '<span class="badge badge-success">In Stock</span>'
+          : '<span class="badge badge-danger">Out of Stock</span>';
+        if (p.units_in_stock > 0 && p.units_in_stock < 10) {
+          statusBadge = '<span class="badge badge-warning">Low Stock (' + p.units_in_stock + ')</span>';
+        }
+        return `<tr>
+          <td><strong>${escHtml(p.product_name)}</strong></td>
+          <td>${escHtml(p.category)}</td>
+          <td>${formatPrice(p.unit_price)}</td>
+          <td>${p.units_in_stock}</td>
+          <td>${p.units_sold}</td>
+          <td>${statusBadge}</td>
+          <td><button class="btn btn-primary btn-sm" onclick="addToQuoteQuick('${escHtml(p.product_name)}', ${p.unit_price})">+ Add to Quote</button></td>
+        </tr>`;
+      }).join('');
+    }
+
+    // Pagination
+    const totalPages = Math.ceil(totalProducts / perPage);
+    const pag = document.getElementById('catalog-pagination');
+    pag.innerHTML = `
+      <button onclick="changePage(1)" ${currentPage <= 1 ? 'disabled' : ''}>&laquo;</button>
+      <button onclick="changePage(${currentPage - 1})" ${currentPage <= 1 ? 'disabled' : ''}>&lsaquo;</button>
+      <span>Page ${currentPage} of ${totalPages} (${totalProducts} products)</span>
+      <button onclick="changePage(${currentPage + 1})" ${currentPage >= totalPages ? 'disabled' : ''}>&rsaquo;</button>
+      <button onclick="changePage(${totalPages})" ${currentPage >= totalPages ? 'disabled' : ''}>&raquo;</button>
+    `;
+  }).catch(err => {
+    document.getElementById('product-tbody').innerHTML = `<tr><td colspan="7" style="color:red;text-align:center;">Error: ${err.message}</td></tr>`;
+  });
+}
+
+function escHtml(s) {
+  const d = document.createElement('div');
+  d.textContent = s;
+  return d.innerHTML;
+}
+
+function changePage(p) {
+  currentPage = p;
+  loadProducts();
+}
+
+function sortProducts(field) {
+  if (sortField === field) { sortDir = sortDir === 'asc' ? 'desc' : 'asc'; }
+  else { sortField = field; sortDir = 'asc'; }
+  loadProducts();
+}
+
+function debounceSearch() {
+  clearTimeout(searchTimeout);
+  searchTimeout = setTimeout(() => { currentPage = 1; loadProducts(); }, 300);
+}
+
+// ── Categories Page ───────────────────────────────────────
+function loadCategories() {
+  document.getElementById('category-tbody').innerHTML = '<tr><td colspan="5" class="loading">Loading...</td></tr>';
+  api('/categories').then(data => {
+    const cats = data.categories || [];
+    if (cats.length === 0) {
+      document.getElementById('category-tbody').innerHTML = '<tr><td colspan="5"><div class="empty-state"><h3>No categories</h3></div></td></tr>';
+      return;
+    }
+    document.getElementById('category-tbody').innerHTML = cats.map(c => `<tr>
+      <td><strong>${escHtml(c.category)}</strong></td>
+      <td>${c.product_count}</td>
+      <td>${c.total_stock}</td>
+      <td>${formatPrice(c.avg_price)}</td>
+      <td><button class="btn btn-outline btn-sm" onclick="filterByCategory('${escHtml(c.category)}')">View Products</button></td>
+    </tr>`).join('');
+  }).catch(err => {
+    document.getElementById('category-tbody').innerHTML = `<tr><td colspan="5" style="color:red;text-align:center;">Error: ${err.message}</td></tr>`;
+  });
+}
+
+function filterByCategory(cat) {
+  document.getElementById('category-filter').value = cat;
+  showPage('catalog');
+  loadProducts();
+}
+
+// ── Quote Page ────────────────────────────────────────────
+function loadQuoteCategories() {
+  api('/categories').then(data => {
+    const cats = data.categories || [];
+    const select = document.getElementById('quote-category-filter');
+    select.innerHTML = '<option value="">All Categories</option>';
+    cats.forEach(c => {
+      select.innerHTML += `<option value="${c.category}">${c.category}</option>`;
+    });
+  }).catch(() => {});
+}
+
+function loadQuoteProducts() {
+  const search = document.getElementById('quote-search').value;
+  const category = document.getElementById('quote-category-filter').value;
+  const inStock = document.getElementById('quote-in-stock').checked;
+
+  document.getElementById('quote-products-list').innerHTML = '<div class="loading">Loading...</div>';
+
+  let url = '/products?per_page=200';
+  if (search) url += `&search=${encodeURIComponent(search)}`;
+  if (category) url += `&category=${encodeURIComponent(category)}`;
+  if (inStock) url += '&in_stock_only=true';
+
+  api(url).then(data => {
+    const prods = data.products || [];
+    if (prods.length === 0) {
+      document.getElementById('quote-products-list').innerHTML = '<div class="empty-state"><h3>No products</h3><p>Try changing filters.</p></div>';
+      return;
+    }
+    document.getElementById('quote-products-list').innerHTML = prods.map(p => {
+      const inCart = quoteItems.find(i => i.product_name === p.product_name);
+      return `<div class="quote-product-item">
+        <div class="info">
+          <div class="name">${escHtml(p.product_name)}</div>
+          <div class="meta">${escHtml(p.category)} &middot; ${formatPrice(p.unit_price)} &middot; Stock: ${p.units_in_stock}</div>
+        </div>
+        <input type="number" class="qty-input" id="qty-${escHtml(p.product_name).replace(/\s/g,'_')}" value="${inCart ? inCart.quantity : 1}" min="1" max="${p.units_in_stock || 99}">
+        <button class="add-btn" onclick="addToQuote('${escHtml(p.product_name)}', ${p.unit_price})">${inCart ? 'Update' : 'Add'}</button>
+      </div>`;
+    }).join('');
+  }).catch(err => {
+    document.getElementById('quote-products-list').innerHTML = `<div style="color:red;text-align:center;padding:20px;">Error: ${err.message}</div>`;
+  });
+}
+
+function debounceQuoteSearch() {
+  clearTimeout(searchTimeout);
+  searchTimeout = setTimeout(() => loadQuoteProducts(), 300);
+}
+
+function addToQuoteQuick(name, price) {
+  const existing = quoteItems.find(i => i.product_name === name);
+  if (existing) {
+    existing.quantity += 1;
+  } else {
+    quoteItems.push({ product_name: name, quantity: 1, unit_price: price });
+  }
+  showNotification(`Added ${name} to quote`, 'success');
+  updateQuoteCart();
+}
+
+function addToQuote(name, price) {
+  const inputId = 'qty-' + name.replace(/\s/g, '_');
+  const input = document.getElementById(inputId);
+  let qty = input ? parseInt(input.value) || 1 : 1;
+  qty = Math.max(1, qty);
+
+  const existing = quoteItems.find(i => i.product_name === name);
+  if (existing) {
+    existing.quantity = qty;
+    showNotification(`Updated ${name} quantity to ${qty}`, 'success');
+  } else {
+    quoteItems.push({ product_name: name, quantity: qty, unit_price: price });
+    showNotification(`Added ${name} (×${qty}) to quote`, 'success');
+  }
+  updateQuoteCart();
+  loadQuoteProducts();
+}
+
+function removeFromQuote(name) {
+  quoteItems = quoteItems.filter(i => i.product_name !== name);
+  showNotification(`Removed ${name} from quote`, 'warning');
+  updateQuoteCart();
+  loadQuoteProducts();
+}
+
+function updateQuoteCart() {
+  const cart = document.getElementById('quote-cart');
+  const totals = document.getElementById('quote-totals');
+  const btn = document.getElementById('quote-btn');
+
+  if (quoteItems.length === 0) {
+    cart.innerHTML = '<div class="empty-state"><h3>No items added</h3><p>Search and add products from the left panel.</p></div>';
+    totals.style.display = 'none';
+    btn.disabled = true;
+    return;
+  }
+
+  btn.disabled = false;
+
+  let subtotal = 0;
+  cart.innerHTML = quoteItems.map(item => {
+    const lineTotal = item.unit_price * item.quantity;
+    subtotal += lineTotal;
+    return `<div class="quote-cart-item">
+      <div>
+        <strong>${escHtml(item.product_name)}</strong>
+        <div style="font-size:0.8rem;color:var(--gray-500);">
+          ${formatPrice(item.unit_price)} × ${item.quantity} = ${formatPrice(lineTotal)}
+        </div>
+      </div>
+      <button class="remove-btn" onclick="removeFromQuote('${escHtml(item.product_name)}')" title="Remove">&times;</button>
+    </div>`;
+  }).join('');
+
+  document.getElementById('quote-subtotal').textContent = formatPrice(subtotal);
+  totals.style.display = 'block';
+}
+
+function generateQuote() {
+  if (quoteItems.length === 0) {
+    showNotification('Add at least one product to the quote', 'warning');
+    return;
+  }
+
+  const destination = document.getElementById('quote-destination').value;
+  const customer = document.getElementById('quote-customer').value;
+
+  document.getElementById('quote-modal').classList.add('open');
+  document.getElementById('quote-modal-body').innerHTML = '<div class="loading">Generating quote...</div>';
+
+  api('/quote', {
+    method: 'POST',
+    body: JSON.stringify({
+      items: quoteItems.map(i => ({ product_name: i.product_name, quantity: i.quantity })),
+      destination_country: destination,
+      customer_name: customer,
+    }),
+  }).then(data => {
+    let html = '';
+
+    if (data.notes && data.notes.length > 0) {
+      html += '<div style="margin-bottom:16px;">';
+      data.notes.forEach(n => {
+        html += `<div style="padding:8px 12px;background:#fef3c7;border-radius:6px;margin-bottom:4px;font-size:0.85rem;">${n}</div>`;
+      });
+      html += '</div>';
+    }
+
+    if (customer) {
+      html += `<p style="margin-bottom:12px;"><strong>Customer:</strong> ${escHtml(customer)}</p>`;
+    }
+    if (destination) {
+      html += `<p style="margin-bottom:12px;"><strong>Destination:</strong> ${escHtml(destination)}</p>`;
+    }
+
+    html += `<p style="margin-bottom:12px;"><strong>Date:</strong> ${new Date().toLocaleDateString()}</p>`;
+
+    html += '<table style="margin-bottom:16px;"><thead><tr>' +
+      '<th>Product</th><th>Qty</th><th>Unit Price</th><th>Line Total</th><th>Est. Shipping</th><th>Shipper</th></tr></thead><tbody>';
+
+    let subTotal = 0;
+    let shipTotal = 0;
+
+    data.line_items.forEach(item => {
+      subTotal += item.line_total;
+      shipTotal += item.estimated_shipping;
+      const warn = item.stock_warning ? `<br><span style="color:var(--warning);font-size:0.8rem;">${item.stock_warning}</span>` : '';
+      html += `<tr>
+        <td>${escHtml(item.product_name)}${warn}</td>
+        <td>${item.quantity}</td>
+        <td>${formatPrice(item.unit_price)}</td>
+        <td><strong>${formatPrice(item.line_total)}</strong></td>
+        <td>${formatPrice(item.estimated_shipping)}</td>
+        <td style="font-size:0.85rem;">${item.shipper}</td>
+      </tr>`;
+    });
+
+    html += '</tbody></table>';
+
+    html += `<div style="border-top:2px solid var(--gray-300);padding-top:12px;">
+      <div class="quote-total-row"><span>Subtotal (Products)</span><span>${formatPrice(data.subtotal_product)}</span></div>
+      <div class="quote-total-row"><span>Estimated Shipping</span><span>${formatPrice(data.total_shipping)}</span></div>
+      <div class="quote-total-row grand"><span>Grand Total</span><span>${formatPrice(data.grand_total)}</span></div>
+    </div>`;
+
+    document.getElementById('quote-modal-body').innerHTML = html;
+  }).catch(err => {
+    document.getElementById('quote-modal-body').innerHTML = `<div style="color:red;text-align:center;padding:20px;">Error: ${err.message}</div>`;
+  });
+}
+
+function closeQuoteModal() {
+  document.getElementById('quote-modal').classList.remove('open');
+}
+
+function printQuote() {
+  const content = document.getElementById('quote-modal-body').innerHTML;
+  const win = window.open('', '', 'width=800,height=600');
+  win.document.write(`
+    <html><head><title>Quote</title>
+    <style>
+      body { font-family: -apple-system, sans-serif; padding: 40px; }
+      table { width: 100%; border-collapse: collapse; }
+      th, td { padding: 8px 12px; text-align: left; border-bottom: 1px solid #ddd; }
+      th { background: #f5f5f5; }
+      @media print { body { padding: 20px; } }
+    </style>
+    </head><body>
+    <h1>Price Quote</h1>
+    ${content}
+    </body></html>
+  `);
+  win.document.close();
+  setTimeout(() => { win.print(); }, 500);
+}
+
+function clearQuote() {
+  quoteItems = [];
+  updateQuoteCart();
+  loadQuoteProducts();
+  document.getElementById('quote-customer').value = '';
+  document.getElementById('quote-destination').value = '';
+  showNotification('Quote cleared', 'warning');
+}
+
+// ── Init ──────────────────────────────────────────────────
+loadStats();
+loadCategoriesFilter();
+loadProducts();
+loadQuoteProducts();
+loadQuoteCategories();
+</script>
+</body>
+</html>
