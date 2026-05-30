@@ -1,26 +1,13 @@
-#!/usr/bin/env python3
-"""
-Parse PDF files from all directories in CompanyDocuments and generate CSV files.
-One row per product line item, with parent order/report info carried over.
-Each row includes a "Source File" column to trace back to the original PDF.
-
-Uses UTF-8 BOM for Excel compatibility with special characters.
-"""
-
-import fitz  # PyMuPDF
+import fitz
 import csv
-import os
 from pathlib import Path
 
-BASE_DIR = Path(__file__).parent
+BASE = Path(__file__).resolve().parent.parent
+PDF_DIR = BASE / "data" / "pdf"
+CSV_DIR = BASE / "data" / "csv"
 
 
 def parse_purchase_orders(pdf_path):
-    """
-    Parse PurchaseOrders PDFs - order header + product table.
-    Products appear as 4-line groups (ID, Name, Qty, Price).
-    Multi-page PDFs repeat headers which must be ignored.
-    """
     doc = fitz.open(pdf_path)
     text = ""
     for page in doc:
@@ -28,48 +15,44 @@ def parse_purchase_orders(pdf_path):
     doc.close()
 
     all_lines = text.split("\n")
-    # Strip trailing whitespace, keep empty lines for boundary detection
     lines = [l.strip() for l in all_lines]
-    
+
     order_id = ""
     order_date = ""
     customer_name = ""
-    source_file = os.path.basename(pdf_path)
-    
-    # Find first occurrence of header to get order info
+    source_file = Path(pdf_path).name
+
     for i in range(len(lines)):
         if lines[i] == "Order ID" and i + 5 < len(lines):
             order_id = lines[i + 3]
             order_date = lines[i + 4]
             customer_name = lines[i + 5]
             break
-    
-    # Lines to skip entirely when in product parsing mode
+
     header_labels = {
         "Purchase Orders", "Order ID", "Order Date", "Customer Name",
         "Products", "Product ID:", "Product:", "Quantity:", "Unit Price:",
         "", "Products",
     }
-    
-    # Find the first actual "Product ID:" - that's where data starts
+
     start_idx = -1
     for i, line in enumerate(lines):
         if line == "Product ID:":
             start_idx = i
             break
-    
+
     if start_idx < 0:
         return []
-    
+
     rows = []
     product_buffer = []
-    
+
     for line in lines[start_idx + 1:]:
         if line in header_labels:
             continue
         if line.startswith("Page"):
             continue
-        
+
         product_buffer.append(line)
         if len(product_buffer) == 4:
             rows.append({
@@ -83,12 +66,11 @@ def parse_purchase_orders(pdf_path):
                 "Unit Price": product_buffer[3],
             })
             product_buffer = []
-    
+
     return rows
 
 
 def parse_invoices(pdf_path):
-    """Parse invoices PDFs"""
     doc = fitz.open(pdf_path)
     text = ""
     for page in doc:
@@ -96,7 +78,7 @@ def parse_invoices(pdf_path):
     doc.close()
 
     lines = [l.strip() for l in text.split("\n") if l.strip()]
-    
+
     order_id = ""
     customer_id = ""
     order_date = ""
@@ -108,8 +90,8 @@ def parse_invoices(pdf_path):
     phone = ""
     fax = ""
     total_price = ""
-    source_file = os.path.basename(pdf_path)
-    
+    source_file = Path(pdf_path).name
+
     for i, line in enumerate(lines):
         if line.startswith("Order ID:"):
             order_id = line.split(":", 1)[1].strip()
@@ -138,8 +120,7 @@ def parse_invoices(pdf_path):
         elif line.startswith("Fax:"):
             if i + 1 < len(lines):
                 fax = lines[i + 1]
-    
-    # TotalPrice appears as "TotalPrice" on one line and the value on the next, or "TotalPrice440.0"
+
     for i, line in enumerate(lines):
         if line.startswith("TotalPrice"):
             val = line[len("TotalPrice"):].strip()
@@ -148,12 +129,11 @@ def parse_invoices(pdf_path):
             elif i + 1 < len(lines):
                 total_price = lines[i + 1]
             break
-    
-    # Parse product table - after "Product ID\nProduct Name\nQuantity\nUnit Price" header
+
     rows = []
     in_products = False
     product_buffer = []
-    
+
     for i, line in enumerate(lines):
         if line == "Product ID":
             if (i + 1 < len(lines) and lines[i + 1] == "Product Name" and
@@ -161,7 +141,7 @@ def parse_invoices(pdf_path):
                 i + 3 < len(lines) and lines[i + 3] == "Unit Price"):
                 in_products = True
                 continue
-        
+
         if not in_products:
             continue
         if line in ("Product Name", "Quantity", "Unit Price", "Product Details:"):
@@ -171,7 +151,7 @@ def parse_invoices(pdf_path):
         if line.startswith("TotalPrice"):
             in_products = False
             continue
-        
+
         product_buffer.append(line)
         if len(product_buffer) == 4:
             rows.append({
@@ -193,12 +173,11 @@ def parse_invoices(pdf_path):
                 "Total Price": total_price,
             })
             product_buffer = []
-    
+
     return rows
 
 
 def parse_shipping_orders(pdf_path):
-    """Parse Shipping orders PDFs"""
     doc = fitz.open(pdf_path)
     text = ""
     for page in doc:
@@ -206,11 +185,11 @@ def parse_shipping_orders(pdf_path):
     doc.close()
 
     lines = [l.strip() for l in text.split("\n") if l.strip()]
-    
+
     data = {}
     rows = []
-    data["Source File"] = os.path.basename(pdf_path)
-    
+    data["Source File"] = Path(pdf_path).name
+
     for line in lines:
         if "Order ID:" in line and "Shipping Details:" not in line:
             data["Order ID"] = line.split(":", 1)[1].strip()
@@ -240,8 +219,7 @@ def parse_shipping_orders(pdf_path):
             data["Order Date"] = line.split(":", 1)[1].strip()
         elif "Shipped Date:" in line:
             data["Shipped Date"] = line.split(":", 1)[1].strip()
-    
-    # Parse total price (value on the line after "Total Price:")
+
     for i, line in enumerate(lines):
         if line.startswith("Total Price:") and i + 1 < len(lines):
             val = lines[i + 1]
@@ -250,10 +228,10 @@ def parse_shipping_orders(pdf_path):
             else:
                 data["Total Price"] = val
             break
-    
+
     in_product = False
     current_product = {}
-    
+
     for line in lines:
         if line.startswith("---"):
             if in_product and current_product:
@@ -282,12 +260,12 @@ def parse_shipping_orders(pdf_path):
                 current_product = {}
             in_product = True
             continue
-        
+
         if in_product:
             if ":" in line:
                 key, _, value = line.partition(":")
                 current_product[key.strip()] = value.strip()
-    
+
     if current_product:
         rows.append({
             "Source File": data.get("Source File", ""),
@@ -311,15 +289,11 @@ def parse_shipping_orders(pdf_path):
             "Product Total": current_product.get("Total", ""),
             "Total Price": data.get("Total Price", ""),
         })
-    
+
     return rows
 
 
 def parse_stock_report_monthly(pdf_path):
-    """
-    Parse Inventory Report monthly stock reports.
-    Format: 5-line groups (Category, Product, UnitsSold, UnitsInStock, UnitPrice)
-    """
     doc = fitz.open(pdf_path)
     text = ""
     for page in doc:
@@ -327,16 +301,16 @@ def parse_stock_report_monthly(pdf_path):
     doc.close()
 
     lines = [l.strip() for l in text.split("\n") if l.strip()]
-    source_file = os.path.basename(pdf_path)
-    
+    source_file = Path(pdf_path).name
+
     report_period = ""
     if lines and lines[0].startswith("Stock Report for"):
         report_period = lines[0].split("for", 1)[1].strip()
-    
+
     rows = []
     header_found = False
     data_buffer = []
-    
+
     for line in lines:
         if line == "Category":
             header_found = True
@@ -347,7 +321,7 @@ def parse_stock_report_monthly(pdf_path):
             continue
         if line.startswith("Stock Report"):
             continue
-        
+
         data_buffer.append(line)
         if len(data_buffer) == 5:
             rows.append({
@@ -360,15 +334,11 @@ def parse_stock_report_monthly(pdf_path):
                 "Unit Price": data_buffer[4],
             })
             data_buffer = []
-    
+
     return rows
 
 
 def parse_stock_report_category(pdf_path):
-    """
-    Parse Inventory Report monthly-Category stock reports.
-    Format: 4-line groups (Product, UnitsSold, UnitsInStock, UnitPrice)
-    """
     doc = fitz.open(pdf_path)
     text = ""
     for page in doc:
@@ -376,12 +346,12 @@ def parse_stock_report_category(pdf_path):
     doc.close()
 
     lines = [l.strip() for l in text.split("\n") if l.strip()]
-    source_file = os.path.basename(pdf_path)
-    
+    source_file = Path(pdf_path).name
+
     report_period = ""
     category = ""
     category_id = ""
-    
+
     for line in lines:
         if line.startswith("Stock Report for"):
             report_period = line.split("for", 1)[1].strip()
@@ -389,11 +359,11 @@ def parse_stock_report_category(pdf_path):
             category = line.split(":", 1)[1].strip()
         elif line.startswith("id category :"):
             category_id = line.split(":", 1)[1].strip()
-    
+
     rows = []
     header_found = False
     data_buffer = []
-    
+
     for line in lines:
         if line == "Product":
             header_found = True
@@ -404,7 +374,7 @@ def parse_stock_report_category(pdf_path):
             continue
         if line.startswith("Stock Report") or line.startswith("Category") or line.startswith("id category"):
             continue
-        
+
         data_buffer.append(line)
         if len(data_buffer) == 4:
             rows.append({
@@ -418,17 +388,17 @@ def parse_stock_report_category(pdf_path):
                 "Unit Price": data_buffer[3],
             })
             data_buffer = []
-    
+
     return rows
 
 
 def write_csv(filename, fieldnames, rows):
-    """Write rows to CSV with UTF-8 BOM for Excel compatibility"""
     if not rows:
         print(f"  No data found for {filename}")
         return
-    
-    filepath = BASE_DIR / filename
+
+    CSV_DIR.mkdir(parents=True, exist_ok=True)
+    filepath = CSV_DIR / filename
     with open(filepath, "w", newline="", encoding="utf-8-sig") as f:
         writer = csv.DictWriter(f, fieldnames=fieldnames)
         writer.writeheader()
@@ -437,14 +407,13 @@ def write_csv(filename, fieldnames, rows):
 
 
 def process_directory(dir_path, parser_func, csv_filename, fieldnames):
-    """Process all PDFs in a directory using the given parser"""
     if not dir_path.exists():
         print(f"Directory not found: {dir_path}")
         return
-    
+
     pdf_files = sorted(dir_path.glob("*.pdf"))
     print(f"Processing {len(pdf_files)} PDFs from {dir_path}")
-    
+
     all_rows = []
     for pdf_file in pdf_files:
         try:
@@ -452,7 +421,7 @@ def process_directory(dir_path, parser_func, csv_filename, fieldnames):
             all_rows.extend(rows)
         except Exception as e:
             print(f"  Error parsing {pdf_file.name}: {e}")
-    
+
     write_csv(csv_filename, fieldnames, all_rows)
 
 
@@ -460,57 +429,52 @@ def main():
     print("=" * 60)
     print("CompanyDocuments PDF Parser")
     print("=" * 60)
-    
-    # 1. PurchaseOrders
+
     print("\n--- PurchaseOrders ---")
     process_directory(
-        BASE_DIR / "PurchaseOrders",
+        PDF_DIR / "PurchaseOrders",
         parse_purchase_orders,
         "PurchaseOrders.csv",
         ["Source File", "Order ID", "Order Date", "Customer Name", "Product ID", "Product Name", "Quantity", "Unit Price"]
     )
-    
-    # 2. Invoices
+
     print("\n--- Invoices ---")
     process_directory(
-        BASE_DIR / "invoices",
+        PDF_DIR / "invoices",
         parse_invoices,
         "invoices.csv",
         ["Source File", "Order ID", "Customer ID", "Order Date", "Contact Name", "Address", "City",
          "Postal Code", "Country", "Phone", "Fax", "Product ID", "Product Name", "Quantity", "Unit Price", "Total Price"]
     )
-    
-    # 3. Shipping orders
+
     print("\n--- Shipping Orders ---")
     process_directory(
-        BASE_DIR / "Shipping orders",
+        PDF_DIR / "Shipping orders",
         parse_shipping_orders,
         "shipping_orders.csv",
         ["Source File", "Order ID", "Ship Name", "Ship Address", "Ship City", "Ship Region", "Ship Postal Code",
          "Ship Country", "Customer ID", "Customer Name", "Employee Name", "Shipper ID", "Shipper Name",
          "Order Date", "Shipped Date", "Product Name", "Quantity", "Unit Price", "Product Total", "Total Price"]
     )
-    
-    # 4. Inventory Report - monthly
+
     print("\n--- Inventory Report (monthly) ---")
     process_directory(
-        BASE_DIR / "Inventory Report" / "monthly" / "monthly",
+        PDF_DIR / "Inventory Report" / "monthly" / "monthly",
         parse_stock_report_monthly,
         "inventory_monthly.csv",
         ["Source File", "Report Period", "Category", "Product Name", "Units Sold", "Units in Stock", "Unit Price"]
     )
-    
-    # 5. Inventory Report - monthly-Category
+
     print("\n--- Inventory Report (monthly-Category) ---")
     process_directory(
-        BASE_DIR / "Inventory Report" / "monthly-Category" / "monthly-Category",
+        PDF_DIR / "Inventory Report" / "monthly-Category" / "monthly-Category",
         parse_stock_report_category,
         "inventory_monthly_category.csv",
         ["Source File", "Report Period", "Category", "Category ID", "Product Name", "Units Sold", "Units in Stock", "Unit Price"]
     )
-    
+
     print("\n" + "=" * 60)
-    print("All done! CSV files generated in CompanyDocuments/")
+    print("All done! CSV files generated in data/csv/")
     print("=" * 60)
 
 

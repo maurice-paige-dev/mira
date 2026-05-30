@@ -1,9 +1,3 @@
-#!/usr/bin/env python3
-"""
-Non-interactive test queries for the Shipping Cost Advisor RAG system.
-Uses the already-built ChromaDB vector store.
-"""
-
 import sys
 from pathlib import Path
 
@@ -11,11 +5,11 @@ from sentence_transformers import SentenceTransformer
 import chromadb
 from chromadb.config import Settings
 
-BASE_DIR = Path(__file__).parent
+BASE = Path(__file__).resolve().parent.parent
+DB_DIR = BASE / "data" / "chroma_shipping_db"
 
 
 def query_shipping(collection, model, query: str, n_results: int = 5) -> list[dict]:
-    """Embed the query and retrieve most relevant documents."""
     q_emb = model.encode([query]).tolist()
     results = collection.query(
         query_embeddings=q_emb,
@@ -38,37 +32,32 @@ def query_shipping(collection, model, query: str, n_results: int = 5) -> list[di
 
 def main():
     print("=" * 60)
-    print("  RAG Shipping Cost Advisor – Test Queries")
+    print("  RAG Shipping Cost Advisor \u2013 Test Queries")
     print("=" * 60)
 
-    db_path = BASE_DIR / "chroma_shipping_db"
-    if not db_path.exists():
-        print("[ERROR] ChromaDB not found. Run rag_shipping_advisor.py first.")
+    if not DB_DIR.exists():
+        print("[ERROR] ChromaDB not found. Run `python -m backend.vector_store --no-interactive` first.")
         sys.exit(1)
 
-    # Load model & collection
-    print("\n  Loading embedding model …")
+    print("\n  Loading embedding model \u2026")
     model = SentenceTransformer("all-MiniLM-L6-v2")
 
-    print("  Opening ChromaDB …")
+    print("  Opening ChromaDB \u2026")
     client = chromadb.PersistentClient(
-        path=str(db_path),
+        path=str(DB_DIR),
         settings=Settings(anonymized_telemetry=False),
     )
     collection = client.get_collection("shipping_advisor")
     count = collection.count()
     print(f"  Collection 'shipping_advisor' has {count} documents")
 
-    # ── Test queries ──
     test_queries = [
-        # Original queries
         "What is the average shipping cost for Queso Cabrales?",
         "Which shipper is cheapest for shipping?",
         "Shipping costs for orders shipped to France",
         "What is the most expensive product to ship?",
         "Compare shipping costs between Federal Shipping and Speedy Express",
         "How much does it cost to ship Tofu?",
-        # Vendor / third-party warehouse queries
         "Which third-party vendors supply Queso Cabrales?",
         "What products does third-party vendor Paul Henriot supply?",
         "How does vendor warehouse proximity affect shipping costs?",
@@ -79,7 +68,7 @@ def main():
 
     for q in test_queries:
         print(f"\n{'─' * 60}")
-        print(f"  ❓ Query: {q}")
+        print(f"  \u2753 Query: {q}")
         print(f"{'─' * 60}")
 
         results = query_shipping(collection, model, q, n_results=3)
@@ -107,7 +96,6 @@ def main():
                 print(f"      Avg     : ${avg_total}")
             if data_type:
                 print(f"      Type    : {data_type}")
-            # Show first 250 chars of text
             text_preview = r["text"][:250]
             print(f"      {text_preview}")
 

@@ -1,32 +1,21 @@
-#!/usr/bin/env python3
-"""
-RAG-based Shipping Cost Advisor
-Loads CSV data (shipping_orders, purchase orders, invoices, inventory) into
-a ChromaDB vector store using sentence-transformers embeddings,
-then answers natural language questions about shipping costs of products.
-"""
-
 import pandas as pd
 import json
 import os
 import sys
+import shutil
 from pathlib import Path
 
-# ───── embedding ─────
 from sentence_transformers import SentenceTransformer
 
-# ───── vector store ─────
 import chromadb
 from chromadb.config import Settings
 
-BASE_DIR = Path(__file__).parent
+BASE = Path(__file__).resolve().parent.parent
+CSV_DIR = BASE / "data" / "csv"
+DB_DIR = BASE / "data" / "chroma_shipping_db"
 
 
-# ────────────────────────────────────────────────────────────
-#  1. Load CSVs
-# ────────────────────────────────────────────────────────────
 def load_all_data() -> dict:
-    """Return dict of DataFrames keyed by stem name."""
     csv_map = {}
     for csv_name in [
         "shipping_orders.csv",
@@ -35,7 +24,7 @@ def load_all_data() -> dict:
         "inventory_monthly.csv",
         "inventory_monthly_category.csv",
     ]:
-        path = BASE_DIR / csv_name
+        path = CSV_DIR / csv_name
         if not path.exists():
             print(f"  [WARN] {csv_name} not found – skipping")
             continue
@@ -46,14 +35,21 @@ def load_all_data() -> dict:
     return csv_map
 
 
-# ────────────────────────────────────────────────────────────
-#  2. Build rich text documents from shipping data
-# ────────────────────────────────────────────────────────────
+def _to_float(val, default=0.0) -> float:
+    try:
+        return float(val)
+    except (ValueError, TypeError):
+        return default
+
+
+def _to_int(val, default=0) -> int:
+    try:
+        return int(float(val))
+    except (ValueError, TypeError):
+        return default
+
+
 def build_shipping_documents(so: pd.DataFrame) -> list[dict]:
-    """
-    Turn each line-item row into a natural-language document so that
-    semantic search can answer questions about shipping costs.
-    """
     docs = []
     for _, row in so.iterrows():
         total = _to_float(row.get("Total Price"))
@@ -96,24 +92,7 @@ def build_shipping_documents(so: pd.DataFrame) -> list[dict]:
     return docs
 
 
-def _to_float(val, default=0.0) -> float:
-    """Safely convert a value to float, returning default on failure."""
-    try:
-        return float(val)
-    except (ValueError, TypeError):
-        return default
-
-
-def _to_int(val, default=0) -> int:
-    """Safely convert a value to int, returning default on failure."""
-    try:
-        return int(float(val))
-    except (ValueError, TypeError):
-        return default
-
-
 def build_inventory_documents(inv: pd.DataFrame) -> list[dict]:
-    """Inventory documents – useful for product context."""
     docs = []
     for _, row in inv.iterrows():
         unit_price = _to_float(row.get("Unit Price"), 0.0)
@@ -142,7 +121,6 @@ def build_inventory_documents(inv: pd.DataFrame) -> list[dict]:
 
 
 def build_purchase_order_documents(po: pd.DataFrame) -> list[dict]:
-    """Purchase order documents – purchase cost context."""
     docs = []
     for _, row in po.iterrows():
         doc = (
@@ -171,7 +149,6 @@ def build_purchase_order_documents(po: pd.DataFrame) -> list[dict]:
 
 
 def build_invoice_documents(inv: pd.DataFrame) -> list[dict]:
-    """Invoice documents – what customers paid."""
     docs = []
     for _, row in inv.iterrows():
         doc = (
@@ -201,24 +178,11 @@ def build_invoice_documents(inv: pd.DataFrame) -> list[dict]:
     return docs
 
 
-# ────────────────────────────────────────────────────────────
-#  3. Build vendor / third-party warehouse proximity documents
-# ────────────────────────────────────────────────────────────
 def build_vendor_warehouse_documents(
     po: pd.DataFrame,
     so: pd.DataFrame,
     inv: pd.DataFrame | None = None,
 ) -> list[dict]:
-    """
-    Model third-party vendors who supply products from one or more
-    distribution warehouses. Generate documents that describe which
-    vendors supply which products, and which geographic regions / countries
-    they serve (their 'warehouse reach').
-
-    The purchase orders "Customer Name" field represents the vendor/supplier.
-    Shipping orders show where customers are located.  By joining these we
-    can infer which vendors serve which regions.
-    """
     docs = []
 
     if po is None or po.empty:
@@ -226,7 +190,6 @@ def build_vendor_warehouse_documents(
     if so is None or so.empty:
         return docs
 
-    # ── Per-vendor product catalog ──
     for vendor, vgrp in po.groupby("Customer Name"):
         products = vgrp["Product Name"].unique()
         product_ids = vgrp["Product ID"].unique()
@@ -255,7 +218,6 @@ def build_vendor_warehouse_documents(
             },
         })
 
-        # ── Per-vendor, per-product details ──
         for prod in products:
             pgrp = vgrp[vgrp["Product Name"] == prod]
             unit_price = _to_float(pgrp["Unit Price"].iloc[0])
@@ -282,9 +244,6 @@ def build_vendor_warehouse_documents(
                 },
             })
 
-    # ── Infer vendor regional reach from shipping orders ──
-    # Join PO vendor info with shipping destinations to determine which
-    # regions/countries each vendor's products ship to.
     po_with_dest = po.merge(
         so[["Order ID", "Ship Country", "Ship City", "Ship Region"]].drop_duplicates(),
         on="Order ID",
@@ -327,10 +286,6 @@ def build_vendor_warehouse_documents(
 def build_third_party_vendor_summary_documents(
     data: dict,
 ) -> list[dict]:
-    """
-    Create aggregate/summary documents about third-party vendor supply chain,
-    warehouse proximity logic, and how it affects shipping costs.
-    """
     docs = []
     po = data.get("PurchaseOrders")
     so = data.get("shipping_orders")
@@ -338,7 +293,6 @@ def build_third_party_vendor_summary_documents(
     if po is None or po.empty:
         return docs
 
-    # ── Overall third-party vendor summary ──
     vendors = po["Customer Name"].unique()
     total_po_value = (po["Quantity"] * po["Unit Price"]).sum()
     total_items = po["Quantity"].sum()
@@ -369,7 +323,6 @@ def build_third_party_vendor_summary_documents(
         },
     })
 
-    # ── Per-product vendor summary (which vendors supply each product) ──
     if so is not None and not so.empty:
         for prod, pgrp in po.groupby("Product Name"):
             vendors_for_product = pgrp["Customer Name"].unique()
@@ -378,7 +331,6 @@ def build_third_party_vendor_summary_documents(
 
             vendor_str = ", ".join(vendors_for_product)
 
-            # Get shipping cost info for this product
             prod_ship = so[so["Product Name"] == prod]
             if not prod_ship.empty:
                 avg_ship = prod_ship["Total Price"].mean()
@@ -412,17 +364,12 @@ def build_third_party_vendor_summary_documents(
     return docs
 
 
-# ────────────────────────────────────────────────────────────
-#  4. Build aggregate / summary docs for better RAG
-# ────────────────────────────────────────────────────────────
 def build_summary_documents(data: dict) -> list[dict]:
-    """Create higher-level aggregate documents from the shipping data."""
     docs = []
     so = data.get("shipping_orders")
     if so is None or so.empty:
         return docs
 
-    # Per-shipper summary
     for shipper, grp in so.groupby("Shipper Name"):
         avg_total = grp["Total Price"].mean()
         min_total = grp["Total Price"].min()
@@ -447,7 +394,6 @@ def build_summary_documents(data: dict) -> list[dict]:
             },
         })
 
-    # Per-product summary
     for prod, grp in so.groupby("Product Name"):
         avg_total = grp["Total Price"].mean()
         avg_product_total = grp["Product Total"].mean()
@@ -470,10 +416,9 @@ def build_summary_documents(data: dict) -> list[dict]:
             },
         })
 
-    # Per-customer summary (not too many to avoid clutter)
     for cust, grp in so.groupby("Customer Name"):
         if len(grp) < 5:
-            continue  # skip small customers
+            continue
         avg_total = grp["Total Price"].mean()
         total_spent = grp["Total Price"].sum()
         doc = (
@@ -498,20 +443,11 @@ def build_summary_documents(data: dict) -> list[dict]:
     return docs
 
 
-# ────────────────────────────────────────────────────────────
-#  5. Embed & store in ChromaDB
-# ────────────────────────────────────────────────────────────
-def build_vector_store(docs: list[dict], persist_dir: str = "chroma_shipping_db"):
-    """
-    Create (or overwrite) a ChromaDB collection from the documents.
-    Uses sentence-transformers for embeddings.
-    """
+def build_vector_store(docs: list[dict], persist_dir: str | None = None):
     model = SentenceTransformer("all-MiniLM-L6-v2")
     print(f"\n  Embedding model: all-MiniLM-L6-v2 (384-dim)")
 
-    # Wipe any previous DB so we always start fresh
-    import shutil
-    db_path = BASE_DIR / persist_dir
+    db_path = Path(persist_dir) if persist_dir else DB_DIR
     if db_path.exists():
         shutil.rmtree(db_path)
 
@@ -519,13 +455,11 @@ def build_vector_store(docs: list[dict], persist_dir: str = "chroma_shipping_db"
         path=str(db_path),
         settings=Settings(anonymized_telemetry=False),
     )
-    # Use a fixed collection name
     collection = client.create_collection(
         name="shipping_advisor",
         metadata={"hnsw:space": "cosine"},
     )
 
-    # Prepare data for ChromaDB
     ids = []
     texts = []
     metadatas = []
@@ -535,7 +469,6 @@ def build_vector_store(docs: list[dict], persist_dir: str = "chroma_shipping_db"
         texts.append(d["text"])
         metadatas.append(d["metadata"])
 
-    # Batch embedding + add
     BATCH = 128
     for i in range(0, len(texts), BATCH):
         batch_end = min(i + BATCH, len(texts))
@@ -555,11 +488,7 @@ def build_vector_store(docs: list[dict], persist_dir: str = "chroma_shipping_db"
     return collection, model
 
 
-# ────────────────────────────────────────────────────────────
-#  6. Query
-# ────────────────────────────────────────────────────────────
 def query_shipping(collection, model, query: str, n_results: int = 5) -> list[dict]:
-    """Embed the query and retrieve most relevant documents."""
     q_emb = model.encode([query]).tolist()
     results = collection.query(
         query_embeddings=q_emb,
@@ -575,17 +504,14 @@ def query_shipping(collection, model, query: str, n_results: int = 5) -> list[di
         out.append({
             "text": doc,
             "metadata": meta,
-            "similarity": 1.0 - dist,  # cosine distance → similarity
+            "similarity": 1.0 - dist,
         })
     return out
 
 
-# ────────────────────────────────────────────────────────────
-#  7. Interactive query loop
-# ────────────────────────────────────────────────────────────
 def interactive_query(collection, model):
-    print("\n" + "═" * 60)
-    print("  Shipping Cost Advisor – RAG Query Mode")
+    print("\n" + "\u2550" * 60)
+    print("  Shipping Cost Advisor \u2013 RAG Query Mode")
     print("  Type your questions about shipping costs.")
     print("  Examples:")
     print('    "What is the average shipping cost for Queso Cabrales?"')
@@ -596,11 +522,11 @@ def interactive_query(collection, model):
     print('    "Which third-party vendors supply Tofu?"')
     print('    "How does vendor warehouse proximity affect shipping?"')
     print("  Type 'quit' or 'exit' to stop.")
-    print("═" * 60)
+    print("\u2550" * 60)
 
     while True:
         try:
-            q = input("\n❓ Query: ").strip()
+            q = input("\n\u2753 Query: ").strip()
         except (EOFError, KeyboardInterrupt):
             print()
             break
@@ -636,13 +562,10 @@ def interactive_query(collection, model):
             print("  " + "-" * 40)
 
 
-# ────────────────────────────────────────────────────────────
-#  8. Main
-# ────────────────────────────────────────────────────────────
 def main():
     import argparse
     parser = argparse.ArgumentParser(
-        description="RAG Shipping Cost Advisor – build vector store and optionally query."
+        description="RAG Shipping Cost Advisor \u2013 build vector store and optionally query."
     )
     parser.add_argument(
         "--no-interactive", "--build-only",
@@ -652,18 +575,16 @@ def main():
     args = parser.parse_args()
 
     print("=" * 60)
-    print("  RAG Shipping Cost Advisor – Data Pipeline")
+    print("  RAG Shipping Cost Advisor \u2013 Data Pipeline")
     print("=" * 60)
 
-    # Load
-    print("\n[1/4] Loading CSV data …")
+    print("\n[1/4] Loading CSV data \u2026")
     data = load_all_data()
     if "shipping_orders" not in data:
         print("  [FATAL] shipping_orders.csv is required. Exiting.")
         sys.exit(1)
 
-    # Build documents
-    print("\n[2/4] Building text documents from data …")
+    print("\n[2/4] Building text documents from data \u2026")
     docs = []
 
     ship_docs = build_shipping_documents(data["shipping_orders"])
@@ -687,7 +608,6 @@ def main():
         docs.extend(invc_docs)
         print(f"  Invoice docs: {len(invc_docs)}")
 
-    # Vendor / third-party warehouse documents
     if "PurchaseOrders" in data and "shipping_orders" in data:
         vendor_docs = build_vendor_warehouse_documents(
             data["PurchaseOrders"],
@@ -707,22 +627,20 @@ def main():
 
     print(f"\n  Total documents: {len(docs)}")
 
-    # Build vector store
-    print("\n[3/4] Building ChromaDB vector store …")
+    print("\n[3/4] Building ChromaDB vector store \u2026")
     collection, model = build_vector_store(docs)
 
     if args.no_interactive:
         print("\n" + "=" * 60)
-        print("  Build complete. Vector DB persisted at chroma_shipping_db/")
+        print("  Build complete. Vector DB persisted at data/chroma_shipping_db/")
         print("=" * 60)
         return
 
-    # Query mode
     print("\n[4/4] Ready!")
     interactive_query(collection, model)
 
     print("\n" + "=" * 60)
-    print("  Done. Vector DB persisted at chroma_shipping_db/")
+    print("  Done. Vector DB persisted at data/chroma_shipping_db/")
     print("=" * 60)
 
 
