@@ -12,7 +12,18 @@ env:
   FRONTEND_IMAGE: ecommerce-frontend
 
 jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - run: pip install -e ".[test]"
+      - run: pytest --cov=backend --cov-fail-under=70 --cov-report=term-missing
+
   build-and-push:
+    needs: [test]
     runs-on: ubuntu-latest
     permissions:
       contents: read
