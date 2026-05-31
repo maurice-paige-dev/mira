@@ -12,7 +12,7 @@
 | **Consumer Staleness** | Seconds since last successful message | `time() - consumer_last_success_timestamp` | < 60s | Pipeline Metrics |
 | **DB Query Latency (p99)** | Slowest 1% of database queries | `histogram_quantile(0.99, rate(db_query_duration_seconds_bucket[1m]))` | < 500ms | Pipeline Metrics |
 | **DB Query Latency (p50)** | Median database query time | `histogram_quantile(0.50, rate(db_query_duration_seconds_bucket[1m]))` | < 50ms | Pipeline Metrics |
-| **ChromaDB Doc Count** | Total documents in vector store | `chroma_documents_total` | monotonic增长 | Pipeline Metrics |
+| **ChromaDB Doc Count** | Total documents in vector store | `chroma_documents_total` | monotonic growth | Pipeline Metrics |
 
 ## 2. API Service Level (RED)
 
@@ -54,7 +54,7 @@
 | **Test Coverage** | Line coverage of `backend/` package | `pytest --cov=backend` in CI | ≥ 70% |
 | **Coverage by Module** | Per-package breakdown | CI job summary (XML report) | each ≥ 60% |
 | **CI Pass Rate** | Percentage of CI runs passing | GitHub Actions | 100% on main |
-| **Test Count** | Total passing test cases | `pytest --collect-only` | monotonic增长 |
+| **Test Count** | Total passing test cases | `pytest --collect-only` | monotonic growth |
 
 ## 6. Aggregated Health (30-Day Rolling)
 
@@ -80,3 +80,22 @@ All time-series KPIs are instrumented via Prometheus metrics defined in `backend
 | `sessions_active_total > 100` | info | High concurrency — consider capacity |
 | `tool_calls_total{status="error"} / tool_calls_total > 0.1` | warning | Agent tool failures |
 | Coverage drops below 70% on main CI | fail | CI pipeline fails the build |
+
+## Per-Area KPI References
+
+Each critical area of the repository has area-specific KPIs that are assessed when code or specs change in that directory:
+
+| Area | File | Scope |
+|---|---|---|
+| Pipeline Agents | `backend/agents/KPIs.md` | Ingestion, transformation, quality, integration agents |
+| Database Layer | `backend/db/KPIs.md` | Models, migrations, repository |
+| Backend Core | `backend/KPIs.md` | APIs, Kafka, vector store, pipeline, orchestrator, aggregator |
+| K8s Infrastructure | `k8s/KPIs.md` | Deployments, statefulsets, HPA, ingress, storage |
+| Observability Stack | `k8s/observability/KPIs.md` | Prometheus, Grafana, Loki, Fluentd, Alertmanager |
+| Vault & Secrets | `k8s/vault/KPIs.md` | Vault, ESO, SecretStore, bootstrap |
+| Test Suite | `tests/KPIs.md` | Coverage, test health, module coverage targets |
+| Frontend | `frontend/KPIs.md` | Build, chatbot UI, catalog UI, nginx, HPA |
+| Design Specs | `specs/KPIs.md` | Spec completeness, KPI awareness, lifecycle |
+| CI/CD Pipeline | `.github/workflows/KPIs.md` | Test job, build job, kustomize, pipeline health |
+| Deployment Scripts | `scripts/KPIs.md` | Local setup, LaunchAgent, script robustness |
+| Documentation | `docs/KPIs.md` (this file) | Completeness, freshness, self-assessment |

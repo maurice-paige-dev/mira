@@ -3,8 +3,10 @@
 - **Specs before code**: Every change must start with a written spec. No implementation without an approved design document.
 - Specs live in a directory matching the change scope: `specs/` for pipeline/agent changes, `k8s/` for Kubernetes/infrastructure changes.
 - A spec must cover: motivation, proposed approach, key decisions, open questions, implementation plan.
+- **KPIs before spec**: Every spec must include a "KPIs Affected" section referencing the relevant subdirectory `KPIs.md` (see `docs/KPIs.md` for the full index). When KPIs change, the per-area `KPIs.md` must be updated.
 - Once the spec is written and confirmed, implementation begins.
 - After implementation, update `README.md` architecture diagram and docs table.
+- After implementation, verify the per-area `KPIs.md` spec assessment checklist was completed.
 
 ## Code conventions
 

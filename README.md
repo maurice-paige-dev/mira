@@ -86,7 +86,7 @@ cd frontend/chatbot && npm install && npm run dev
 ## Docs & Specs
 
 | Document | What it covers |
-|---|---|
+|---|---|---|
 | **Specifications** | |
 | [Kafka ingestion spec](specs/kafka-ingestion.md) | Event-driven pipeline replacing batch CronJob with Kafka streaming |
 | [Observability spec](specs/observability.md) | Structured logging, Prometheus metrics, Grafana dashboards, alerting |
@@ -98,6 +98,19 @@ cd frontend/chatbot && npm install && npm run dev
 | **Operational guides** | |
 | [DevOps guide](docs/devops.md) | Deployment commands, local dev, troubleshooting |
 | [Secrets management](docs/secrets.md) | Vault + External Secrets Operator, bootstrap flow |
+| **KPIs by Area** | |
+| [Global KPIs & alerts](docs/KPIs.md) | Cross-cutting operational metrics, Prometheus queries, Alertmanager thresholds |
+| [Pipeline agents KPIs](backend/agents/KPIs.md) | Ingestion, transformation, quality, integration agent health |
+| [Database KPIs](backend/db/KPIs.md) | Query latency, model completeness, migration idempotency |
+| [Backend core KPIs](backend/KPIs.md) | APIs, Kafka streaming, vector store, pipeline, aggregator |
+| [K8s infrastructure KPIs](k8s/KPIs.md) | Deployments, statefulsets, HPA, ingress, storage |
+| [Observability KPIs](k8s/observability/KPIs.md) | Prometheus, Grafana, Loki, Fluentd, Alertmanager health |
+| [Secrets KPIs](k8s/vault/KPIs.md) | Vault seal status, secret sync, ESO health |
+| [Test suite KPIs](tests/KPIs.md) | Coverage thresholds, pass rate, per-module targets |
+| [Frontend KPIs](frontend/KPIs.md) | Build, chatbot/catalog UI, nginx, bundle size |
+| [Specs KPIs](specs/KPIs.md) | Spec completeness criteria, KPI awareness checklist |
+| [CI/CD KPIs](.github/workflows/KPIs.md) | Build times, pass rate, artifact upload, coverage gate |
+| [Scripts KPIs](scripts/KPIs.md) | Idempotency, error handling, LaunchAgent correctness |
 
 ## Key decisions
 
