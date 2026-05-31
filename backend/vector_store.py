@@ -10,6 +10,10 @@ from sentence_transformers import SentenceTransformer
 import chromadb
 from chromadb.config import Settings
 
+from backend.telemetry import get_logger
+
+log = get_logger("vector_store")
+
 BASE = Path(__file__).resolve().parent.parent
 CSV_DIR = BASE / "data" / "csv"
 DB_DIR = BASE / "data" / "chroma_shipping_db"
@@ -26,12 +30,12 @@ def load_all_data() -> dict:
     ]:
         path = CSV_DIR / csv_name
         if not path.exists():
-            print(f"  [WARN] {csv_name} not found – skipping")
+            log.warning("csv_not_found", csv=csv_name)
             continue
         df = pd.read_csv(path)
         stem = csv_name.replace(".csv", "")
         csv_map[stem] = df
-        print(f"  Loaded {csv_name}: {len(df)} rows, {len(df.columns)} columns")
+        log.info("csv_loaded", csv=csv_name, rows=len(df), columns=len(df.columns))
     return csv_map
 
 
@@ -445,7 +449,7 @@ def build_summary_documents(data: dict) -> list[dict]:
 
 def build_vector_store(docs: list[dict], persist_dir: str | None = None):
     model = SentenceTransformer("all-MiniLM-L6-v2")
-    print(f"\n  Embedding model: all-MiniLM-L6-v2 (384-dim)")
+    log.info("embedding_model_loaded", model="all-MiniLM-L6-v2", dim=384)
 
     db_path = Path(persist_dir) if persist_dir else DB_DIR
     if db_path.exists():
@@ -484,7 +488,7 @@ def build_vector_store(docs: list[dict], persist_dir: str | None = None):
             metadatas=batch_metas,
         )
 
-    print(f"  Added {len(docs)} documents to ChromaDB collection 'shipping_advisor'")
+    log.info("documents_added", count=len(docs), collection="shipping_advisor")
     return collection, model
 
 
@@ -510,6 +514,7 @@ def query_shipping(collection, model, query: str, n_results: int = 5) -> list[di
 
 
 def interactive_query(collection, model):
+    log.info("interactive_mode_started")
     print("\n" + "\u2550" * 60)
     print("  Shipping Cost Advisor \u2013 RAG Query Mode")
     print("  Type your questions about shipping costs.")
@@ -574,39 +579,35 @@ def main():
     )
     args = parser.parse_args()
 
-    print("=" * 60)
-    print("  RAG Shipping Cost Advisor \u2013 Data Pipeline")
-    print("=" * 60)
-
-    print("\n[1/4] Loading CSV data \u2026")
+    log.info("pipeline_started")
     data = load_all_data()
     if "shipping_orders" not in data:
-        print("  [FATAL] shipping_orders.csv is required. Exiting.")
+        log.critical("shipping_orders_required")
         sys.exit(1)
 
-    print("\n[2/4] Building text documents from data \u2026")
+    log.info("building_documents")
     docs = []
 
     ship_docs = build_shipping_documents(data["shipping_orders"])
     docs.extend(ship_docs)
-    print(f"  Shipping-order line-item docs: {len(ship_docs)}")
+    log.info("shipping_docs", count=len(ship_docs))
 
     if "inventory_monthly" in data:
         inv_docs = build_inventory_documents(data["inventory_monthly"])
         docs.extend(inv_docs)
-        print(f"  Inventory docs: {len(inv_docs)}")
+        log.info("inventory_docs", count=len(inv_docs))
     if "inventory_monthly_category" in data:
         inv_docs2 = build_inventory_documents(data["inventory_monthly_category"])
         docs.extend(inv_docs2)
-        print(f"  Inventory (category) docs: {len(inv_docs2)}")
+        log.info("inventory_category_docs", count=len(inv_docs2))
     if "PurchaseOrders" in data:
         po_docs = build_purchase_order_documents(data["PurchaseOrders"])
         docs.extend(po_docs)
-        print(f"  Purchase-order docs: {len(po_docs)}")
+        log.info("purchase_order_docs", count=len(po_docs))
     if "invoices" in data:
         invc_docs = build_invoice_documents(data["invoices"])
         docs.extend(invc_docs)
-        print(f"  Invoice docs: {len(invc_docs)}")
+        log.info("invoice_docs", count=len(invc_docs))
 
     if "PurchaseOrders" in data and "shipping_orders" in data:
         vendor_docs = build_vendor_warehouse_documents(
@@ -615,33 +616,29 @@ def main():
             data.get("inventory_monthly"),
         )
         docs.extend(vendor_docs)
-        print(f"  Vendor warehouse / third-party docs: {len(vendor_docs)}")
+        log.info("vendor_warehouse_docs", count=len(vendor_docs))
 
         vendor_summary_docs = build_third_party_vendor_summary_documents(data)
         docs.extend(vendor_summary_docs)
-        print(f"  Third-party vendor summary docs: {len(vendor_summary_docs)}")
+        log.info("vendor_summary_docs", count=len(vendor_summary_docs))
 
     summary_docs = build_summary_documents(data)
     docs.extend(summary_docs)
-    print(f"  Summary / aggregate docs: {len(summary_docs)}")
+    log.info("summary_docs", count=len(summary_docs))
 
-    print(f"\n  Total documents: {len(docs)}")
+    log.info("total_documents", count=len(docs))
 
-    print("\n[3/4] Building ChromaDB vector store \u2026")
+    log.info("building_vector_store")
     collection, model = build_vector_store(docs)
 
     if args.no_interactive:
-        print("\n" + "=" * 60)
-        print("  Build complete. Vector DB persisted at data/chroma_shipping_db/")
-        print("=" * 60)
+        log.info("build_complete", path="data/chroma_shipping_db/")
         return
 
-    print("\n[4/4] Ready!")
+    log.info("ready_for_queries")
     interactive_query(collection, model)
 
-    print("\n" + "=" * 60)
-    print("  Done. Vector DB persisted at data/chroma_shipping_db/")
-    print("=" * 60)
+    log.info("done", path="data/chroma_shipping_db/")
 
 
 if __name__ == "__main__":

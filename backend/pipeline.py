@@ -2,6 +2,10 @@ import fitz
 import csv
 from pathlib import Path
 
+from backend.telemetry import get_logger
+
+log = get_logger("pipeline")
+
 BASE = Path(__file__).resolve().parent.parent
 PDF_DIR = BASE / "data" / "pdf"
 CSV_DIR = BASE / "data" / "csv"
@@ -394,7 +398,7 @@ def parse_stock_report_category(pdf_path):
 
 def write_csv(filename, fieldnames, rows):
     if not rows:
-        print(f"  No data found for {filename}")
+        log.warning("no_data", csv=filename)
         return
 
     CSV_DIR.mkdir(parents=True, exist_ok=True)
@@ -403,16 +407,16 @@ def write_csv(filename, fieldnames, rows):
         writer = csv.DictWriter(f, fieldnames=fieldnames)
         writer.writeheader()
         writer.writerows(rows)
-    print(f"  Wrote {len(rows)} rows to {filename}")
+    log.info("csv_written", csv=filename, rows=len(rows))
 
 
 def process_directory(dir_path, parser_func, csv_filename, fieldnames):
     if not dir_path.exists():
-        print(f"Directory not found: {dir_path}")
+        log.warning("directory_not_found", path=str(dir_path))
         return
 
     pdf_files = sorted(dir_path.glob("*.pdf"))
-    print(f"Processing {len(pdf_files)} PDFs from {dir_path}")
+    log.info("processing_pdfs", count=len(pdf_files), path=str(dir_path))
 
     all_rows = []
     for pdf_file in pdf_files:
@@ -420,17 +424,15 @@ def process_directory(dir_path, parser_func, csv_filename, fieldnames):
             rows = parser_func(str(pdf_file))
             all_rows.extend(rows)
         except Exception as e:
-            print(f"  Error parsing {pdf_file.name}: {e}")
+            log.error("parse_error", file=pdf_file.name, error=str(e))
 
     write_csv(csv_filename, fieldnames, all_rows)
 
 
 def main():
-    print("=" * 60)
-    print("CompanyDocuments PDF Parser")
-    print("=" * 60)
+    log.info("pdf_parser_started")
 
-    print("\n--- PurchaseOrders ---")
+    log.info("processing_purchase_orders")
     process_directory(
         PDF_DIR / "PurchaseOrders",
         parse_purchase_orders,
@@ -438,7 +440,7 @@ def main():
         ["Source File", "Order ID", "Order Date", "Customer Name", "Product ID", "Product Name", "Quantity", "Unit Price"]
     )
 
-    print("\n--- Invoices ---")
+    log.info("processing_invoices")
     process_directory(
         PDF_DIR / "invoices",
         parse_invoices,
@@ -447,7 +449,7 @@ def main():
          "Postal Code", "Country", "Phone", "Fax", "Product ID", "Product Name", "Quantity", "Unit Price", "Total Price"]
     )
 
-    print("\n--- Shipping Orders ---")
+    log.info("processing_shipping_orders")
     process_directory(
         PDF_DIR / "Shipping orders",
         parse_shipping_orders,
@@ -457,7 +459,7 @@ def main():
          "Order Date", "Shipped Date", "Product Name", "Quantity", "Unit Price", "Product Total", "Total Price"]
     )
 
-    print("\n--- Inventory Report (monthly) ---")
+    log.info("processing_inventory_monthly")
     process_directory(
         PDF_DIR / "Inventory Report" / "monthly" / "monthly",
         parse_stock_report_monthly,
@@ -465,7 +467,7 @@ def main():
         ["Source File", "Report Period", "Category", "Product Name", "Units Sold", "Units in Stock", "Unit Price"]
     )
 
-    print("\n--- Inventory Report (monthly-Category) ---")
+    log.info("processing_inventory_category")
     process_directory(
         PDF_DIR / "Inventory Report" / "monthly-Category" / "monthly-Category",
         parse_stock_report_category,
@@ -473,9 +475,7 @@ def main():
         ["Source File", "Report Period", "Category", "Category ID", "Product Name", "Units Sold", "Units in Stock", "Unit Price"]
     )
 
-    print("\n" + "=" * 60)
-    print("All done! CSV files generated in data/csv/")
-    print("=" * 60)
+    log.info("pdf_parser_complete", output_dir="data/csv/")
 
 
 if __name__ == "__main__":

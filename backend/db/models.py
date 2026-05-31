@@ -1,4 +1,4 @@
-from sqlalchemy import Column, Integer, String, Float, DateTime, text
+from sqlalchemy import Column, Integer, String, Float, DateTime, func
 from sqlalchemy.orm import DeclarativeBase
 
 
@@ -17,7 +17,7 @@ class Product(Base):
     units_sold = Column(Integer, default=0)
     report_period = Column(String(50))
     source_file = Column(String(255))
-    ingested_at = Column(DateTime, server_default=text("NOW()"))
+    ingested_at = Column(DateTime, server_default=func.current_timestamp())
 
 
 class PurchaseOrder(Base):
@@ -32,7 +32,7 @@ class PurchaseOrder(Base):
     quantity = Column(Integer, default=0)
     unit_price = Column(Float, default=0.0)
     source_file = Column(String(255))
-    ingested_at = Column(DateTime, server_default=text("NOW()"))
+    ingested_at = Column(DateTime, server_default=func.current_timestamp())
 
 
 class ShippingOrder(Base):
@@ -59,7 +59,7 @@ class ShippingOrder(Base):
     product_total = Column(Float, default=0.0)
     total_price = Column(Float, default=0.0)
     source_file = Column(String(255))
-    ingested_at = Column(DateTime, server_default=text("NOW()"))
+    ingested_at = Column(DateTime, server_default=func.current_timestamp())
 
 
 class Invoice(Base):
@@ -82,4 +82,4 @@ class Invoice(Base):
     unit_price = Column(Float, default=0.0)
     total_price = Column(Float, default=0.0)
     source_file = Column(String(255))
-    ingested_at = Column(DateTime, server_default=text("NOW()"))
+    ingested_at = Column(DateTime, server_default=func.current_timestamp())

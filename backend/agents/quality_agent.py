@@ -8,6 +8,9 @@ committed to the CSV store.
 from prefect import task
 
 from backend.agents.schema_config import TARGETS
+from backend.telemetry import get_logger
+
+log = get_logger("quality_agent")
 
 
 def validate(rows: list[dict], target_key: str) -> list[dict]:

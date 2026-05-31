@@ -11,6 +11,9 @@ from datetime import datetime
 from backend.chroma_upsert import get_model, get_collection, upsert_aggregate_document
 from backend.db.migrations import create_tables
 from backend.db.repository import get_session, get_aggregated_top_categories
+from backend.telemetry import get_logger
+
+log = get_logger("aggregator")
 
 DATABASE_URL = os.environ.get("DATABASE_URL", "")
 CHROMA_PATH = os.environ.get("CHROMA_DB_PATH", "")
@@ -70,7 +73,7 @@ def _build_summary_doc(session) -> dict | None:
 
 def run() -> None:
     if not DATABASE_URL or not CHROMA_PATH:
-        print("[aggregator] DATABASE_URL and CHROMA_DB_PATH are required")
+        log.error("missing_config", detail="DATABASE_URL and CHROMA_DB_PATH are required")
         return
 
     create_tables(DATABASE_URL)
@@ -98,9 +101,9 @@ def run() -> None:
             model=model,
             collection=collection,
         )
-        print(f"[aggregator] Upserted {doc['id']}")
+        log.info("upserted", doc_id=doc["id"])
 
-    print(f"[aggregator] Done — {len(docs)} aggregate document(s)")
+    log.info("done", aggregate_docs=len(docs))
 
 
 if __name__ == "__main__":

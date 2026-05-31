@@ -10,6 +10,14 @@ def get_session(database_url: str) -> Session:
 
 
 def upsert_product(session: Session, data: dict) -> Product:
+    name = data.get("product_name", "")
+    existing = session.query(Product).filter(Product.product_name == name).first()
+    if existing:
+        for key, value in data.items():
+            if hasattr(existing, key):
+                setattr(existing, key, value)
+        session.commit()
+        return existing
     product = Product(**data)
     session.add(product)
     session.commit()

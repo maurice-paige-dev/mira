@@ -7,6 +7,11 @@ Publishes product records to the configured Kafka topic.
 import json
 from kafka import KafkaProducer
 
+from backend.telemetry import get_logger
+from backend.metrics import KAFKA_MESSAGES_PRODUCED
+
+log = get_logger("producer")
+
 
 def create_producer(
     bootstrap_servers: str = "localhost:9092",
@@ -36,6 +41,8 @@ def publish_record(
 ) -> None:
     msg_key = key or str(record.get("id", record.get("product_name", "unknown")))
     producer.send(topic=topic, key=msg_key, value=record)
+    KAFKA_MESSAGES_PRODUCED.labels(topic=topic).inc()
+    log.debug("record_published", topic=topic, key=msg_key)
 
 
 def publish_batch(
@@ -48,9 +55,13 @@ def publish_batch(
         key = str(record.get(key_field, "unknown"))
         producer.send(topic=topic, key=key, value=record)
     producer.flush()
-    return len(records)
+    count = len(records)
+    KAFKA_MESSAGES_PRODUCED.labels(topic=topic).inc(count)
+    log.info("batch_published", topic=topic, count=count)
+    return count
 
 
 def close_producer(producer: KafkaProducer) -> None:
     producer.flush()
     producer.close()
+    log.debug("producer_closed")

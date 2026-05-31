@@ -14,6 +14,9 @@ from pathlib import Path
 from prefect import flow
 
 from backend.agents import ingestion_agent, transformation_agent, quality_agent, integration_agent
+from backend.telemetry import get_logger
+
+log = get_logger("orchestrator")
 
 
 PIPELINE_STEPS = ["ingest", "transform", "validate", "integrate"]
@@ -49,12 +52,10 @@ def run_pipeline(
         report["message"] = f"File not found: {file_path}"
         return report
 
-    print(f"\n{'='*60}")
-    print(f"  Pipeline: {file_path.name} \u2192 {target}")
-    print(f"{'='*60}")
+    log.info("pipeline_started", file=file_path.name, target=target)
 
     # ── 2. Ingest ──────────────────────────────────────────
-    print(f"\n[1/4] Ingesting {file_path.name} \u2026")
+    log.info("step_ingest", file=file_path.name)
     try:
         rows = ingestion_agent.ingest(file_path)
         report["steps"]["ingest"] = {"status": "ok", "records": len(rows)}
@@ -64,7 +65,7 @@ def run_pipeline(
         return report
 
     # ── 3. Transform ───────────────────────────────────────
-    print(f"\n[2/4] Transforming to '{target}' schema \u2026")
+    log.info("step_transform", target=target)
     try:
         preview = transformation_agent.preview(rows, target)
         transformed = transformation_agent.transform(rows, target)
@@ -72,39 +73,36 @@ def run_pipeline(
             "status": "ok",
             "records_out": len(transformed),
         }
-        print(f"  [transform] {len(transformed)} record(s) mapped")
-        print("  Preview (first 3):")
+        log.info("transform_complete", records=len(transformed))
         for line in preview.splitlines()[:4]:
-            print(f"    {line}")
+            log.debug("preview", line=line)
     except Exception as exc:
         report["steps"]["transform"] = {"status": "failed", "error": str(exc)}
         report["message"] = f"Transformation failed: {exc}"
         return report
 
     # ── 4. Validate ────────────────────────────────────────
-    print(f"\n[3/4] Validating {len(transformed)} record(s) \u2026")
+    log.info("step_validate", records=len(transformed))
     qr = quality_agent.quality_report(transformed, target)
     report["steps"]["validate"] = qr
 
     if not qr["passed"]:
-        print(f"  [validate] FAILED \u2014 {qr['error_count']} error(s)")
+        log.warning("validation_failed", errors=qr['error_count'])
         for err in qr["errors"]:
-            print(f"    Row {err['row']}, {err['field']}: {err['message']}")
+            log.warning("validation_error", row=err['row'], field=err['field'], message=err['message'])
         report["message"] = f"Quality checks failed: {qr['error_count']} error(s)"
         return report
 
-    print(f"  [validate] Passed ({len(transformed)} record(s) OK)")
+    log.info("validation_passed", records=len(transformed))
 
     if dry_run:
-        print(f"\n{'─'*60}")
-        print(f"  DRY RUN \u2014 no data written. Passed validation.")
-        print(f"{'─'*60}")
+        log.info("dry_run", detail="validation passed, no data committed")
         report["passed"] = True
         report["message"] = "Dry run: validation passed, no data committed."
         return report
 
     # ── 5. Integrate ───────────────────────────────────────
-    print(f"\n[4/4] Integrating into CSV + RAG \u2026")
+    log.info("step_integrate")
     try:
         result = integration_agent.integrate(transformed, target, rebuild_rag=rebuild_rag)
         report["steps"]["integrate"] = result
@@ -114,15 +112,13 @@ def run_pipeline(
             f"written to {Path(result['csv']).name}. "
             f"RAG rebuild: {result['rag_rebuild']}."
         )
-        print(f"  [integrate] Done.")
+        log.info("integrate_complete")
     except Exception as exc:
         report["steps"]["integrate"] = {"status": "failed", "error": str(exc)}
         report["message"] = f"Integration failed: {exc}"
         return report
 
-    print(f"\n{'='*60}")
-    print(f"  {report['message']}")
-    print(f"{'='*60}")
+    log.info("pipeline_complete", message=report['message'])
 
     return report
 
@@ -132,7 +128,7 @@ def run_all(rebuild_rag: bool = True, dry_run: bool = False) -> list[dict]:
     """Run the pipeline on every file in the ingest directory."""
     files = ingestion_agent.discover_new_files()
     if not files:
-        print("No new files to process.")
+        log.info("no_new_files_to_process")
         return []
 
     reports = []

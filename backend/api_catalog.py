@@ -1,10 +1,11 @@
 import os
 import math
+import time
 from pathlib import Path
 from contextlib import asynccontextmanager
 
 import uvicorn
-from fastapi import FastAPI, HTTPException, Query
+from fastapi import FastAPI, HTTPException, Query, Request
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import HTMLResponse
 from pydantic import BaseModel
@@ -18,6 +19,10 @@ from backend.db.repository import (
     get_product_by_name,
     get_shipping_cost,
 )
+from backend.telemetry import get_logger
+from backend.metrics import metrics_endpoint, HTTP_REQUEST_COUNT, HTTP_REQUEST_DURATION
+
+log = get_logger("catalog")
 
 BASE = Path(__file__).resolve().parent.parent
 STATIC_DIR = BASE / "frontend" / "catalog"
@@ -32,9 +37,9 @@ def _get_db():
 async def lifespan(application: FastAPI):
     if DATABASE_URL:
         create_tables(DATABASE_URL)
-        print("Catalog API — database tables ready")
+        log.info("database_tables_ready")
     else:
-        print("Catalog API — no DATABASE_URL, running without persistence")
+        log.info("no_database_url", detail="running without persistence")
     yield
 
 
@@ -52,6 +57,22 @@ app.add_middleware(
     allow_methods=["*"],
     allow_headers=["*"],
 )
+
+
+@app.middleware("http")
+async def metrics_and_logging(request: Request, call_next):
+    method = request.method
+    path = request.url.path
+    start = time.monotonic()
+    response = await call_next(request)
+    elapsed = time.monotonic() - start
+    HTTP_REQUEST_COUNT.labels(method=method, path=path, status=response.status_code).inc()
+    HTTP_REQUEST_DURATION.labels(method=method, path=path).observe(elapsed)
+    log.info("request", method=method, path=path, status=response.status_code, elapsed_ms=round(elapsed * 1000))
+    return response
+
+
+app.add_route("/metrics", metrics_endpoint)
 
 app.include_router(upload_router)
 
@@ -264,9 +285,7 @@ def health():
 
 
 if __name__ == "__main__":
-    print("=" * 60)
-    print("  Product Catalog Management & Quoting System")
-    print("=" * 60)
+    log.info("starting", port=8001)
     uvicorn.run(
         "backend.api_catalog:app",
         host="0.0.0.0",

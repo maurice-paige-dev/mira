@@ -58,6 +58,7 @@ INVENTORY_MONTHLY_SCHEMA = {
         "Source File": _generate_source_file,
         "Report Period": lambda: datetime.now().strftime("%Y-%m"),
         "Category": "Uncategorized",
+        "Unit Price": 0.0,
         "Units Sold": 0,
         "Units in Stock": 0,
     },

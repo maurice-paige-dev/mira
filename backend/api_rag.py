@@ -1,16 +1,22 @@
 import sys
+import time
 from pathlib import Path
 from typing import Optional
 from contextlib import asynccontextmanager
 
 import uvicorn
-from fastapi import FastAPI, HTTPException
+from fastapi import FastAPI, HTTPException, Request
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
 
 from sentence_transformers import SentenceTransformer
 import chromadb
 from chromadb.config import Settings
+
+from backend.telemetry import get_logger
+from backend.metrics import metrics_endpoint, HTTP_REQUEST_COUNT, HTTP_REQUEST_DURATION
+
+log = get_logger("rag")
 
 BASE = Path(__file__).resolve().parent.parent
 DB_DIR = BASE / "data" / "chroma_shipping_db"
@@ -23,23 +29,23 @@ collection: Optional[chromadb.Collection] = None
 async def lifespan(application: FastAPI):
     global model, collection
     if not DB_DIR.exists():
-        print("[FATAL] ChromaDB not found. Run `python -m backend.vector_store --no-interactive` first.")
+        log.critical("chromadb_not_found", detail="Run `python -m backend.vector_store --no-interactive` first.")
         sys.exit(1)
 
-    print("Loading embedding model\u2026")
+    log.info("loading_embedding_model")
     model = SentenceTransformer("all-MiniLM-L6-v2")
 
-    print("Opening ChromaDB\u2026")
+    log.info("opening_chromadb")
     client = chromadb.PersistentClient(
         path=str(DB_DIR),
         settings=Settings(anonymized_telemetry=False),
     )
     collection = client.get_collection("shipping_advisor")
     count = collection.count()
-    print(f"Collection 'shipping_advisor' ready \u2013 {count} documents")
+    log.info("collection_ready", collection="shipping_advisor", documents=count)
 
     yield
-    print("Shutting down\u2026")
+    log.info("shutting_down")
 
 
 app = FastAPI(
@@ -56,6 +62,22 @@ app.add_middleware(
     allow_methods=["*"],
     allow_headers=["*"],
 )
+
+
+@app.middleware("http")
+async def metrics_and_logging(request: Request, call_next):
+    method = request.method
+    path = request.url.path
+    start = time.monotonic()
+    response = await call_next(request)
+    elapsed = time.monotonic() - start
+    HTTP_REQUEST_COUNT.labels(method=method, path=path, status=response.status_code).inc()
+    HTTP_REQUEST_DURATION.labels(method=method, path=path).observe(elapsed)
+    log.info("request", method=method, path=path, status=response.status_code, elapsed_ms=round(elapsed * 1000))
+    return response
+
+
+app.add_route("/metrics", metrics_endpoint)
 
 
 class ChatRequest(BaseModel):
@@ -206,6 +228,7 @@ def chat(req: ChatRequest):
 
 
 if __name__ == "__main__":
+    log.info("starting", port=8000)
     uvicorn.run(
         "backend.api_rag:app",
         host="0.0.0.0",

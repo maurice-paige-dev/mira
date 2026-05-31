@@ -15,13 +15,16 @@ from io import StringIO
 from prefect import task
 
 from backend.agents.schema_config import TARGETS
+from backend.telemetry import get_logger
+
+log = get_logger("transformation_agent")
 
 
 def _match_field(input_field: str, candidates: list[str]) -> bool:
     """Case-insensitive match; also strips whitespace / underscores."""
-    cleaned = input_field.strip().lower().replace("_", "").replace("-", "")
+    cleaned = input_field.strip().lower().replace("_", "").replace("-", "").replace(" ", "")
     return any(
-        cleaned == c.strip().lower().replace("_", "").replace("-", "")
+        cleaned == c.strip().lower().replace("_", "").replace("-", "").replace(" ", "")
         for c in candidates
     )
 
@@ -89,7 +92,7 @@ def transform(rows: list[dict], target_key: str) -> list[dict]:
                 try:
                     value = transformers[target_field](value)
                 except Exception as exc:
-                    print(f"  [warn] Transformer failed for {target_field}={value!r}: {exc}")
+                    log.warning("transformer_failed", field=target_field, value=repr(value), error=str(exc))
                     value = 0.0
 
             out[target_field] = value if value is not None else ""

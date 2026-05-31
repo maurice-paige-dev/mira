@@ -18,6 +18,10 @@ from backend.agents import transformation_agent, quality_agent
 from backend.agents.integration_agent import integrate
 from backend.agents.schema_config import TARGETS
 from backend.db.migrations import create_tables
+from backend.telemetry import get_logger
+from backend.metrics import KAFKA_MESSAGES_CONSUMED, KAFKA_DLQ_MESSAGES, PRODUCTS_INGESTED
+
+log = get_logger("consumer")
 
 TOPIC = os.environ.get("KAFKA_TOPIC_PRODUCT_INGEST", "product-ingest")
 DLQ_TOPIC = os.environ.get("KAFKA_TOPIC_DLQ", "product-ingest-dlq")
@@ -68,7 +72,8 @@ def _send_to_dlq(producer: DlqProducer, message: dict, error: str) -> None:
     message["error"] = error
     producer.send(DLQ_TOPIC, value=message)
     producer.flush()
-    print(f"  [consumer] Sent to DLQ: {error}")
+    KAFKA_DLQ_MESSAGES.labels(topic=DLQ_TOPIC, reason=error.split(":")[0]).inc()
+    log.warning("sent_to_dlq", error=error)
 
 
 def _process_message(
@@ -84,7 +89,7 @@ def _process_message(
         _send_to_dlq(dlq, msg_value, f"Unknown target: {target}")
         return True
 
-    print(f"  [consumer] Processing record from {source_file} (target={target})")
+    log.info("processing_record", source=source_file, target=target)
 
     try:
         transformed = transformation_agent.transform([record], target)
@@ -111,10 +116,11 @@ def _process_message(
             database_url=DATABASE_URL,
             chroma_path=CHROMA_PATH,
         )
-        print(f"  [consumer] Integrated {result['rows_processed']} record(s)")
+        PRODUCTS_INGESTED.inc(result['rows_processed'])
+        log.info("integrated", rows=result['rows_processed'])
         return True
     except Exception as e:
-        print(f"  [consumer] Integration failed (will retry): {e}")
+        log.error("integration_failed", error=str(e))
         return False
 
 
@@ -123,7 +129,7 @@ def run() -> None:
 
     def shutdown(signum, frame):
         global running
-        print("\n[consumer] Shutdown signal received…")
+        log.info("shutdown_signal_received")
         running = False
 
     signal.signal(signal.SIGINT, shutdown)
@@ -131,11 +137,13 @@ def run() -> None:
 
     if DATABASE_URL:
         create_tables(DATABASE_URL)
-        print("[consumer] Database tables ready")
+        log.info("database_tables_ready")
 
     consumer = KafkaConsumer(TOPIC, **_consumer_config())
     dlq = _dlq_producer()
-    print(f"[consumer] Subscribed to {TOPIC} (group={GROUP_ID})")
+    log.info("subscribed", topic=TOPIC, group=GROUP_ID)
+
+    KAFKA_MESSAGES_CONSUMED.labels(topic=TOPIC)
 
     try:
         while running:
@@ -148,21 +156,22 @@ def run() -> None:
                     if not running:
                         break
                     try:
+                        KAFKA_MESSAGES_CONSUMED.labels(topic=TOPIC).inc()
                         ok = _process_message(msg.value, dlq)
                     except Exception as e:
-                        print(f"  [consumer] Unexpected error: {e}")
+                        log.error("unexpected_error", error=str(e))
                         ok = False
 
                     if ok:
                         consumer.commit()
                     else:
-                        print("  [consumer] Will retry on next poll")
+                        log.warning("will_retry_on_next_poll")
     except KeyboardInterrupt:
         pass
     finally:
         consumer.close()
         dlq.close()
-        print("[consumer] Stopped")
+        log.info("stopped")
 
 
 if __name__ == "__main__":

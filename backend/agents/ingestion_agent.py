@@ -13,6 +13,10 @@ from datetime import datetime
 
 from prefect import task
 
+from backend.telemetry import get_logger
+
+log = get_logger("ingestion_agent")
+
 BASE = Path(__file__).resolve().parent.parent.parent
 INGEST_DIR = BASE / "data" / "ingest"
 PROCESSED_DIR = INGEST_DIR / "processed"
@@ -102,6 +106,5 @@ def ingest(file_path: Path) -> list[dict]:
     rows = parse_file(file_path)
     rows = tag_records(rows, file_path.name)
     archived = move_to_processed(file_path)
-    print(f"  [ingest] Parsed {len(rows)} record(s) from {file_path.name}")
-    print(f"  [ingest] Archived to {archived}")
+    log.info("ingest_complete", file=file_path.name, records=len(rows), archived=str(archived))
     return rows

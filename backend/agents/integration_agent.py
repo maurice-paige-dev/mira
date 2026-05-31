@@ -10,6 +10,9 @@ from pathlib import Path
 from prefect import task
 
 from backend.db.migrations import create_tables
+from backend.telemetry import get_logger
+
+log = get_logger("integration_agent")
 from backend.db.repository import (
     get_session,
     upsert_product,
@@ -46,7 +49,7 @@ def _write_to_postgres(rows: list[dict], target_key: str, database_url: str) -> 
     try:
         count = 0
         for row in rows:
-            data = {k.lower(): v for k, v in row.items()}
+            data = {k.lower().replace(" ", "_"): v for k, v in row.items()}
             if target_key in ("inventory", "inventory_category"):
                 product_data = {
                     "product_name": data.get("product_name", ""),
@@ -82,7 +85,7 @@ def _upsert_chromadb(rows: list[dict], target_key: str, chroma_path: str) -> int
             chroma_upsert(row, model, collection)
             count += 1
         except Exception as e:
-            print(f"  [integrate] ChromaDB upsert failed for row: {e}")
+            log.warning("chromadb_upsert_failed", error=str(e))
     return count
 
 
@@ -100,15 +103,15 @@ def integrate(
     if database_url:
         create_tables(database_url)
         count_pg = _write_to_postgres(rows, target_key, database_url)
-        print(f"  [integrate] Wrote {count_pg} rows to PostgreSQL ({target_key})")
+        log.info("pg_write_complete", rows=count_pg, target=target_key)
     else:
-        print("  [integrate] Skipped PostgreSQL (no DATABASE_URL)")
+        log.info("pg_skipped", detail="no DATABASE_URL")
 
     if rebuild_rag and chroma_path and target_key in CHROMA_TARGETS:
         count_chroma = _upsert_chromadb(rows, target_key, chroma_path)
-        print(f"  [integrate] Upserted {count_chroma} embeddings to ChromaDB")
+        log.info("chromadb_upsert_complete", embeddings=count_chroma)
     else:
-        print(f"  [integrate] Skipped ChromaDB (rebuild={rebuild_rag}, target={target_key})")
+        log.info("chromadb_skipped", rebuild=rebuild_rag, target=target_key)
 
     return {
         "target": target_key,

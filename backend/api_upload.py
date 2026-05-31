@@ -13,7 +13,10 @@ from fastapi import APIRouter, HTTPException, UploadFile, File, Form
 from kafka import KafkaProducer as KProducer
 
 from backend.agents.ingestion_agent import parse_file
+from backend.telemetry import get_logger
+from backend.metrics import KAFKA_MESSAGES_PRODUCED
 
+log = get_logger("upload")
 router = APIRouter()
 
 KAFKA_BOOTSTRAP = os.environ.get("KAFKA_BOOTSTRAP_SERVERS", "localhost:9092")
@@ -80,6 +83,9 @@ async def upload_file(
         producer.flush()
     finally:
         producer.close()
+
+    KAFKA_MESSAGES_PRODUCED.labels(topic=KAFKA_TOPIC).inc(sent)
+    log.info("upload_complete", file=file.filename, target=target, records=sent)
 
     return {
         "accepted": True,

@@ -4,6 +4,11 @@ import chromadb
 from chromadb.config import Settings
 from sentence_transformers import SentenceTransformer
 
+from backend.telemetry import get_logger
+from backend.metrics import CHROMA_DOCUMENTS
+
+log = get_logger("chroma_upsert")
+
 
 def _build_document_text(product: dict) -> str:
     name = product.get("product_name", product.get("name", "Unknown"))
@@ -65,6 +70,8 @@ def upsert_product(
         metadatas=[metadata],
         documents=[doc_text],
     )
+    CHROMA_DOCUMENTS.labels(collection=collection.name).set(collection.count())
+    log.debug("product_upserted", doc_id=doc_id)
     return doc_id
 
 
@@ -75,8 +82,9 @@ def delete_product(
     doc_id = f"product_{product_name}"
     try:
         collection.delete(ids=[doc_id])
+        CHROMA_DOCUMENTS.labels(collection=collection.name).set(collection.count())
     except Exception:
-        pass
+        log.warning("delete_failed", doc_id=doc_id)
 
 
 def upsert_aggregate_document(
@@ -93,3 +101,5 @@ def upsert_aggregate_document(
         metadatas=[metadata],
         documents=[text],
     )
+    CHROMA_DOCUMENTS.labels(collection=collection.name).set(collection.count())
+    log.debug("aggregate_upserted", doc_id=doc_id)
