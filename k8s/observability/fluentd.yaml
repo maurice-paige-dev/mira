@@ -1,0 +1,199 @@
+---
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: fluentd
+  namespace: ecommerce
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRole
+metadata:
+  name: fluentd
+rules:
+  - apiGroups: [""]
+    resources:
+      - pods
+      - namespaces
+    verbs:
+      - get
+      - list
+      - watch
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRoleBinding
+metadata:
+  name: fluentd
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: ClusterRole
+  name: fluentd
+subjects:
+  - kind: ServiceAccount
+    name: fluentd
+    namespace: ecommerce
+---
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: fluentd-config
+  namespace: ecommerce
+data:
+  fluent.conf: |
+    <source>
+      @type tail
+      @id container_logs
+      path /var/log/containers/*.log
+      pos_file /var/log/fluentd-containers.log.pos
+      tag kubernetes.*
+      read_from_head true
+      <parse>
+        @type json
+        time_key timestamp
+        time_format %Y-%m-%dT%H:%M:%S.%N%Z
+      </parse>
+    </source>
+
+    <filter kubernetes.**>
+      @type record_transformer
+      <record>
+        service ${record.get("service", "unknown")}
+        component ${record.get("component", "unknown")}
+        level ${record.get("level", "info")}
+      </record>
+    </filter>
+
+    <match kubernetes.var.log.containers.**kafka-consumer**.log>
+      @type loki
+      url "http://loki:3100/loki/api/v1/push"
+      <label>
+        service
+        component
+        level
+        namespace
+      </label>
+      label_keys
+      remove_keys timestamp,level
+      flush_interval 5s
+    </match>
+
+    <match kubernetes.var.log.containers.**catalog**.log>
+      @type loki
+      url "http://loki:3100/loki/api/v1/push"
+      <label>
+        service
+        component
+        level
+        namespace
+      </label>
+      label_keys
+      remove_keys timestamp,level
+      flush_interval 5s
+    </match>
+
+    <match kubernetes.var.log.containers.**chatbot**.log>
+      @type loki
+      url "http://loki:3100/loki/api/v1/push"
+      <label>
+        service
+        component
+        level
+        namespace
+      </label>
+      label_keys
+      remove_keys timestamp,level
+      flush_interval 5s
+    </match>
+
+    <match kubernetes.var.log.containers.**upload**.log>
+      @type loki
+      url "http://loki:3100/loki/api/v1/push"
+      <label>
+        service
+        component
+        level
+        namespace
+      </label>
+      label_keys
+      remove_keys timestamp,level
+      flush_interval 5s
+    </match>
+
+    <match kubernetes.var.log.containers.**aggregator**.log>
+      @type loki
+      url "http://loki:3100/loki/api/v1/push"
+      <label>
+        service
+        component
+        level
+        namespace
+      </label>
+      label_keys
+      remove_keys timestamp,level
+      flush_interval 5s
+    </match>
+
+    <match **>
+      @type loki
+      url "http://loki:3100/loki/api/v1/push"
+      <label>
+        namespace
+      </label>
+      label_keys
+      remove_keys timestamp
+      flush_interval 5s
+    </match>
+---
+apiVersion: apps/v1
+kind: DaemonSet
+metadata:
+  name: fluentd
+  namespace: ecommerce
+spec:
+  selector:
+    matchLabels:
+      app: fluentd
+  template:
+    metadata:
+      labels:
+        app: fluentd
+    spec:
+      serviceAccountName: fluentd
+      containers:
+        - name: fluentd
+          image: fluent/fluentd-kubernetes-daemonset:v1.16-debian-loki-1
+          env:
+            - name: LOKI_URL
+              value: http://loki:3100
+            - name: LOKI_USERNAME
+              value: ""
+            - name: LOKI_PASSWORD
+              value: ""
+          volumeMounts:
+            - name: varlog
+              mountPath: /var/log
+            - name: dockercontainers
+              mountPath: /var/lib/docker/containers
+              readOnly: true
+            - name: config
+              mountPath: /fluentd/etc
+            - name: pos
+              mountPath: /var/log/fluentd
+          resources:
+            requests:
+              memory: 256Mi
+              cpu: 200m
+            limits:
+              memory: 512Mi
+              cpu: 500m
+      volumes:
+        - name: varlog
+          hostPath:
+            path: /var/log
+        - name: dockercontainers
+          hostPath:
+            path: /var/lib/docker/containers
+        - name: config
+          configMap:
+            name: fluentd-config
+        - name: pos
+          emptyDir: {}
