@@ -50,6 +50,61 @@ CHROMA_DOCUMENTS = Gauge(
     ["collection"],
 )
 
+# LangGraph agent metrics
+AGENT_CALLS = Counter(
+    "agent_calls_total",
+    "Total agent invocations",
+    ["agent", "action"],
+)
+
+AGENT_LATENCY = Histogram(
+    "agent_latency_seconds",
+    "Agent execution latency in seconds",
+    ["agent"],
+    buckets=(0.1, 0.5, 1.0, 2.5, 5.0, 10.0, 30.0, 60.0),
+)
+
+TOOL_CALLS = Counter(
+    "tool_calls_total",
+    "Total tool invocations by agents",
+    ["agent", "tool", "status"],
+)
+
+SESSIONS_ACTIVE = Gauge(
+    "sessions_active_total",
+    "Currently active chat sessions",
+)
+
+# Image CDN metrics
+IMAGES_UPLOADED = Counter(
+    "images_uploaded_total",
+    "Total product images uploaded to CDN",
+    ["variant"],
+)
+
+IMAGES_SERVED = Counter(
+    "images_served_total",
+    "Total product images served from CDN",
+    ["variant"],
+)
+
+CDN_BANDWIDTH_BYTES = Counter(
+    "cdn_bandwidth_bytes_total",
+    "Total bandwidth served by image CDN in bytes",
+)
+
+# Consumer health metrics
+CONSUMER_LAG = Gauge(
+    "consumer_lag_total",
+    "Kafka consumer lag (messages behind latest offset)",
+    ["partition"],
+)
+
+CONSUMER_LAST_SUCCESS = Gauge(
+    "consumer_last_success_timestamp",
+    "Unix timestamp of last successfully processed message",
+)
+
 
 def metrics_endpoint(request):
     return Response(content=generate_latest(), media_type=CONTENT_TYPE_LATEST)

@@ -37,5 +37,10 @@ data/ingest/processed/
 # --- Generated pipeline data ---
 data/csv/
 
+# --- Coverage reports ---
+htmlcov/
+.coverage
+coverage.xml
+
 # --- Orphaned / unused ---
 company-document-text.csv
