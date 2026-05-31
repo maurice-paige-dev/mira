@@ -1,0 +1,121 @@
+---
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: prometheus-rules
+  namespace: ecommerce
+data:
+  alerts.yml: |
+    groups:
+      - name: pipeline
+        interval: 30s
+        rules:
+          - alert: ConsumerLagHigh
+            expr: consumer_lag_total > 1000
+            for: 5m
+            labels:
+              severity: warning
+            annotations:
+              summary: "Kafka consumer lag is {{ $value }} messages behind"
+              description: "Partition {{ $labels.partition }} has high consumer lag. Scale consumer or investigate broker."
+
+          - alert: ConsumerStalled
+            expr: time() - consumer_last_success_timestamp > 120
+            labels:
+              severity: critical
+            annotations:
+              summary: "Kafka consumer has not processed a message in {{ $value | humanizeDuration }}"
+              description: "Consumer may be down or stuck. Check the kafka_consumer pod and broker connectivity."
+
+          - alert: NoProductsIngested
+            expr: increase(products_ingested_total[1h]) == 0
+            for: 2h
+            labels:
+              severity: warning
+            annotations:
+              summary: "No products ingested in the last hour"
+              description: "The ingestion pipeline may be stalled. Check the CSV connector and Kafka producer."
+
+      - name: api
+        interval: 30s
+        rules:
+          - alert: HighErrorRate
+            expr: rate(http_requests_total{status=~"5.."}[5m]) > 0.05
+            for: 5m
+            labels:
+              severity: warning
+            annotations:
+              summary: "HTTP 5xx error rate is {{ $value | humanizePercentage }}"
+              description: "Service {{ $labels.job }} has elevated error rate on path {{ $labels.path }}."
+
+          - alert: ServiceDown
+            expr: up{job=~"catalog|chatbot"} == 0
+            for: 1m
+            labels:
+              severity: critical
+            annotations:
+              summary: "{{ $labels.job }} is unreachable"
+              description: "Prometheus cannot scrape {{ $labels.job }}. The service may be down."
+
+          - alert: HighLatency
+            expr: histogram_quantile(0.99, sum(rate(http_request_duration_seconds_bucket[5m])) by (le, job)) > 1.0
+            for: 5m
+            labels:
+              severity: warning
+            annotations:
+              summary: "p99 latency is {{ $value }}s for {{ $labels.job }}"
+              description: "Response times are above the 1s threshold."
+
+      - name: agents
+        interval: 30s
+        rules:
+          - alert: ToolFailureRateHigh
+            expr: rate(tool_calls_total{status="error"}[5m]) / rate(tool_calls_total[5m]) > 0.1
+            for: 5m
+            labels:
+              severity: warning
+            annotations:
+              summary: "Agent tool failure rate is {{ $value | humanizePercentage }}"
+              description: "Agent {{ $labels.agent }} tool {{ $labels.tool }} is failing frequently."
+
+          - alert: HighConcurrency
+            expr: sessions_active_total > 100
+            for: 5m
+            labels:
+              severity: info
+            annotations:
+              summary: "Active sessions at {{ $value }}"
+              description: "Chat session concurrency is high. Consider scaling agent pods."
+
+          - alert: AgentLatencyHigh
+            expr: histogram_quantile(0.95, rate(agent_latency_seconds_bucket[5m])) > 15.0
+            for: 5m
+            labels:
+              severity: warning
+            annotations:
+              summary: "Agent p95 latency is {{ $value }}s for {{ $labels.agent }}"
+              description: "Agent {{ $labels.agent }} is taking longer than 15s at p95."
+
+      - name: cdn
+        interval: 30s
+        rules:
+          - alert: CDNUploadsSurge
+            expr: rate(images_uploaded_total[5m]) > 10
+            for: 2m
+            labels:
+              severity: info
+            annotations:
+              summary: "CDN upload rate is {{ $value }}/s"
+              description: "A large batch of product images is being uploaded."
+
+      - name: database
+        interval: 30s
+        rules:
+          - alert: SlowQueries
+            expr: histogram_quantile(0.99, rate(db_query_duration_seconds_bucket[5m])) > 0.5
+            for: 5m
+            labels:
+              severity: warning
+            annotations:
+              summary: "p99 DB query latency is {{ $value }}s"
+              description: "Database queries on operation {{ $labels.operation }} are slow."
