@@ -279,6 +279,66 @@ def _estimate_shipping(session, product_name: str, quantity: int, destination: s
     }
 
 
+import uuid
+from fastapi import File, UploadFile, Form
+from backend.db.repository import get_session, get_product_by_name
+from backend.db.models import Product
+from backend.config import S3_IMAGES_BUCKET, CDN_BASE_URL, AWS_REGION
+
+
+def _s3_client():
+    import boto3
+    return boto3.client("s3", region_name=AWS_REGION)
+
+
+@app.post("/api/images/upload")
+async def upload_image(
+    product_name: str = Form(...),
+    variant: str = Form("full"),
+    file: UploadFile = File(...),
+):
+    if not DATABASE_URL:
+        raise HTTPException(status_code=503, detail="Database not configured")
+
+    safe_name = product_name.lower().replace(" ", "-")
+    ext = file.filename.rsplit(".", 1)[-1] if file.filename else "jpg"
+    key = f"products/{safe_name}/{variant}.{ext}"
+
+    contents = await file.read()
+    content_type = file.content_type or "image/jpeg"
+
+    s3 = _s3_client()
+    try:
+        s3.put_object(
+            Bucket=S3_IMAGES_BUCKET,
+            Key=key,
+            Body=contents,
+            ContentType=content_type,
+        )
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"S3 upload failed: {e}")
+
+    cdn_url = f"{CDN_BASE_URL}/{key}"
+
+    session = _get_db()
+    try:
+        product = session.query(Product).filter(Product.product_name.ilike(product_name)).first()
+        if product:
+            product.image_cdn_url = cdn_url
+            session.commit()
+    finally:
+        session.close()
+
+    log.info("image_uploaded", product=product_name, variant=variant, size=len(contents), url=cdn_url)
+    return {
+        "product_name": product_name,
+        "variant": variant,
+        "cdn_url": cdn_url,
+        "size_bytes": len(contents),
+        "content_type": content_type,
+    }
+
+
 @app.get("/api/health")
 def health():
     return {"status": "ok", "database_url_configured": bool(DATABASE_URL)}

@@ -17,6 +17,7 @@ class Product(Base):
     units_sold = Column(Integer, default=0)
     report_period = Column(String(50))
     source_file = Column(String(255))
+    image_cdn_url = Column(String(512), nullable=True)
     ingested_at = Column(DateTime, server_default=func.current_timestamp())
 
 

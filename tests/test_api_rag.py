@@ -32,21 +32,19 @@ def mock_chromadb_lifespan(monkeypatch, tmp_path):
     chroma_dir.mkdir()
     monkeypatch.setattr("backend.api_rag.DB_DIR", chroma_dir)
 
-    fake_client = FakeChromaClient()
-
     class FakePersistentClient:
         def __init__(self, path, settings=None):
             pass
 
         def get_collection(self, name):
-            return fake_client.collection
+            return FakeCollection()
 
     monkeypatch.setattr("chromadb.PersistentClient", FakePersistentClient)
+    monkeypatch.setattr("backend.api_rag._graph", None)
+    monkeypatch.setattr("sentence_transformers.SentenceTransformer", lambda *a, **kw: _fake_model())
 
 
-class FakeChromaClient:
-    def __init__(self):
-        self.collection = FakeCollection()
+
 
 
 class TestChat:
@@ -55,9 +53,8 @@ class TestChat:
             resp = client.post("/chat", json={"query": "shipping costs"})
         assert resp.status_code == 200
         data = resp.json()
-        assert "answer" in data
-        assert len(data["results"]) > 0
-        assert data["total_docs"] == 3
+        assert "session_id" in data
+        assert "stream_url" in data
 
     def test_empty_query(self):
         with TestClient(_app()) as client:
@@ -69,20 +66,17 @@ class TestChat:
             resp = client.post("/chat", json={"query": "   "})
         assert resp.status_code == 400
 
-    def test_not_initialized(self):
-        from backend.api_rag import chat, collection, model
-        old_col = collection
-        old_mod = model
+    def test_not_initialized(self, monkeypatch):
         import backend.api_rag as rag
-        rag.collection = None
-        rag.model = None
-        from fastapi import HTTPException
-        import pytest
-        with pytest.raises(HTTPException) as exc:
-            chat({"query": "test"})
-        assert exc.value.status_code == 503
-        rag.collection = old_col
-        rag.model = old_mod
+        monkeypatch.setattr(rag, "collection", None)
+        monkeypatch.setattr(rag, "model", None)
+        with TestClient(rag.app, raise_server_exceptions=False) as client:
+            # The lifespan runs on enter and sets collection/model.
+            # Re-null them immediately after lifespan completes.
+            rag.collection = None
+            rag.model = None
+            resp = client.post("/chat", json={"query": "test"})
+        assert resp.status_code == 503
 
 
 class TestHealth:
@@ -94,59 +88,56 @@ class TestHealth:
         assert data["status"] == "ok"
         assert data["chroma_docs"] == 3
 
-    def test_health_not_initialized(self):
-        from backend.api_rag import health, collection, model
+    def test_health_not_initialized(self, monkeypatch):
         import backend.api_rag as rag
-        old_col = rag.collection
-        old_mod = rag.model
-        rag.collection = None
-        rag.model = None
-        from fastapi import HTTPException
-        import pytest
-        with pytest.raises(HTTPException) as exc:
-            health()
-        assert exc.value.status_code == 503
-        rag.collection = old_col
-        rag.model = old_mod
+        monkeypatch.setattr(rag, "collection", None)
+        monkeypatch.setattr(rag, "model", None)
+        with TestClient(rag.app, raise_server_exceptions=False) as client:
+            rag.collection = None
+            rag.model = None
+            resp = client.get("/health")
+        assert resp.status_code == 503
 
 
-class TestQueryShipping:
-    def test_query_shipping_returns_results(self):
-        from backend.api_rag import query_shipping
-        col = FakeCollection()
-        mdl = _fake_model()
-        results = query_shipping(col, mdl, "test query", n_results=2)
+class TestQueryChromadb:
+    def test_query_returns_results(self):
+        from backend.api_rag import query_chromadb
+        results = query_chromadb("test query", n_results=2)
         assert len(results) == 2
         assert all("text" in r for r in results)
         assert all("metadata" in r for r in results)
         assert all("similarity" in r for r in results)
 
-    def test_query_shipping_empty_collection(self):
-        from backend.api_rag import query_shipping
-
-        class EmptyCollection:
-            def count(self):
-                return 0
-            def query(self, **kw):
-                return {"ids": [[]], "documents": [[]], "metadatas": [[]], "distances": [[]]}
-
-        results = query_shipping(EmptyCollection(), _fake_model(), "test")
+    def test_query_empty(self):
+        from backend.api_rag import query_chromadb
+        import backend.api_rag as rag
+        old = rag.collection
+        rag.collection = FakeEmptyCollection()
+        results = query_chromadb("test")
         assert results == []
+        rag.collection = old
 
 
-class TestBuildAnswer:
+class FakeEmptyCollection:
+    def count(self):
+        return 0
+    def query(self, **kw):
+        return {"ids": [[]], "documents": [[]], "metadatas": [[]], "distances": [[]]}
+
+
+class TestBuildFallbackAnswer:
     def test_build_answer_with_results(self):
-        from backend.api_rag import build_answer
+        from backend.api_rag import build_fallback_answer
         results = [
             {"text": "Chai tea product", "metadata": {"product_name": "Chai", "total_price": "25.0", "source": "inventory"}, "similarity": 0.95},
         ]
-        answer = build_answer("shipping costs", results)
+        answer = build_fallback_answer("shipping costs", results)
         assert "Chai" in answer
         assert "shipping costs" in answer
 
     def test_build_answer_empty(self):
-        from backend.api_rag import build_answer
-        answer = build_answer("test", [])
+        from backend.api_rag import build_fallback_answer
+        answer = build_fallback_answer("test", [])
         assert "couldn't find" in answer.lower()
 
 
@@ -161,3 +152,15 @@ def _fake_model():
             n = len(texts) if isinstance(texts, list) else 1
             return np.zeros((n, 384), dtype=np.float32)
     return FakeModel()
+
+
+def test_history_endpoint():
+    with TestClient(_app()) as client:
+        chat_resp = client.post("/chat", json={"query": "hello"})
+        assert chat_resp.status_code == 200
+        session_id = chat_resp.json()["session_id"]
+        hist_resp = client.get(f"/chat/history/{session_id}")
+        assert hist_resp.status_code == 200
+        data = hist_resp.json()
+        assert data["session_id"] == session_id
+        assert len(data["messages"]) > 0
