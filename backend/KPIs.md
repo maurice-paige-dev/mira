@@ -1,6 +1,6 @@
 # Backend Core — KPIs
 
-> Covers APIs (`api_catalog.py`, `api_rag.py`, `api_upload.py`), streaming (`kafka_consumer.py`, `kafka_producer.py`), observability code (`metrics.py`, `telemetry.py`), pipeline (`pipeline.py`, `orchestrator.py`, `watcher.py`), vector store (`vector_store.py`, `chroma_upsert.py`), and aggregator (`aggregator.py`). When any file in `backend/` (excluding subdirectories) changes, these KPIs must be assessed.
+> Covers APIs (`api_catalog.py`, `api_rag.py`, `api_upload.py`), streaming (`kafka_consumer.py`, `kafka_producer.py`), observability code (`metrics.py`, `telemetry.py`), pipeline (`pipeline.py`, `orchestrator.py`, `deployments.py`), vector store (`vector_store.py`, `chroma_upsert.py`), and aggregator (`aggregator.py`). When any file in `backend/` (excluding subdirectories) changes, these KPIs must be assessed.
 
 ## 1. Catalog API (`api_catalog.py` — port 8001)
 
@@ -74,16 +74,20 @@
 
 **Degradation signals:** Zero document count despite successful pipeline runs indicates ChromaDB path mismatch or collection name mismatch.
 
-## 7. Pipeline Orchestration (`orchestrator.py`, `watcher.py`)
+## 7. Pipeline Orchestration (`orchestrator.py`, `deployments.py`)
 
 | KPI | Definition | Instrumentation | Target |
 |---|---|---|---|
-| Pipeline Success Rate | `run_pipeline` passes all steps | Log-derived (`pipeline_complete` / `pipeline_fail`) | ≥ 95% |
-| Step Failure Rate | Failures per pipeline step | Log-derived | ingest < 2%, transform < 1%, validate < 5%, integrate < 1% |
-| Watcher Cycle Time | Time to discover + process one file | — | < 60s |
+| Pipeline Success Rate | `run_pipeline` passes all steps | Prefect UI + `PREFECT_FLOW_STATE` gauge | ≥ 95% |
+| Step Failure Rate | Failures per pipeline step | Prefect auto-tracks per-task state | ingest < 2%, transform < 1%, validate < 5%, integrate < 1% |
+| Watcher Cycle Time | Time to discover + process one file | Prefect flow run duration | < 60s |
 | File Failure Rate | Files moved to `failed/` | Log-derived (`moved_to_failed`) | < 5% |
+| Cache Hit Rate | `quality_report` returns cached result | `@task(cache_policy=INPUTS)` | ≥ 10% of validation calls |
+| Concurrency | Files processed in parallel by `run_all` | `ConcurrentTaskRunner` | ≥ 4 concurrent runs |
+| Flow State | Prefect flow run state | `PREFECT_FLOW_STATE{flow_name,state}` | 2 (completed) |
+| Schedule Uptime | Cron deployment fires each minute | Prefect scheduled run history | ≥ 99% of expected runs |
 
-**Degradation signals:** Watcher runs but files stay in `ingest/` suggests stability check loop or permission error.
+**Degradation signals:** `PREFECT_FLOW_STATE` shows repeated `3 (failed)` or `4 (crashed)` for `watch_once` or `run_pipeline` flows; cron deployment misses scheduled slots.
 
 ## 8. Aggregator (`aggregator.py`)
 
@@ -104,3 +108,5 @@ When a spec proposes changes in `backend/` root files, verify:
 - [ ] Are there integration/unit tests in `tests/` for the new code?
 - [ ] Do Kafka topic names or consumer groups need updating in K8s configs?
 - [ ] Does the aggregator CronJob need a new aggregate document type?
+- [ ] Do Prefect deployments need notification blocks or alerting rules?
+- [ ] Are cache policies (INPUTS) correctly scoped to avoid stale results?

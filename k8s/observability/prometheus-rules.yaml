@@ -10,6 +10,33 @@ data:
       - name: pipeline
         interval: 30s
         rules:
+          - alert: PrefectFlowFailed
+            expr: prefect_flow_state{state="failed"} > 0
+            for: 2m
+            labels:
+              severity: warning
+            annotations:
+              summary: "Prefect flow {{ $labels.flow_name }} is failing"
+              description: "Flow {{ $labels.flow_name }} is in failed state. Check Prefect UI for run details."
+
+          - alert: PrefectFlowCrashed
+            expr: prefect_flow_state{state="crashed"} > 0
+            for: 1m
+            labels:
+              severity: critical
+            annotations:
+              summary: "Prefect flow {{ $labels.flow_name }} has crashed"
+              description: "Flow {{ $labels.flow_name }} is in crashed state. Immediate investigation needed."
+
+          - alert: PrefectScheduleMissed
+            expr: time() - prefect_flow_state{state="completed"} offset 1m > 120
+            for: 5m
+            labels:
+              severity: warning
+            annotations:
+              summary: "Prefect watch_once schedule may have missed a run"
+              description: "No completed watch_once run in the last 2 minutes. The cron schedule or agent may be down."
+
           - alert: ConsumerLagHigh
             expr: consumer_lag_total > 1000
             for: 5m

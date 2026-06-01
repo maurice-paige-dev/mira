@@ -189,6 +189,30 @@ data:
           "datasource": "Prometheus"
         },
         {
+          "title": "Prefect Flow State",
+          "type": "timeseries",
+          "gridPos": { "h": 6, "w": 6, "x": 12, "y": 14 },
+          "targets": [
+            {
+              "expr": "prefect_flow_state{state=\"completed\"}",
+              "legendFormat": "completed — {{flow_name}}"
+            },
+            {
+              "expr": "prefect_flow_state{state=\"failed\"}",
+              "legendFormat": "failed — {{flow_name}}"
+            },
+            {
+              "expr": "prefect_flow_state{state=\"running\"}",
+              "legendFormat": "running — {{flow_name}}"
+            },
+            {
+              "expr": "prefect_flow_state{state=\"crashed\"}",
+              "legendFormat": "crashed — {{flow_name}}"
+            }
+          ],
+          "datasource": "Prometheus"
+        },
+        {
           "title": "DB Query Duration (p50)",
           "type": "timeseries",
           "gridPos": { "h": 6, "w": 6, "x": 12, "y": 8 },

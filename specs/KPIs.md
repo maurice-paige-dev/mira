@@ -37,6 +37,7 @@
 | `agentic-chat.md` | In progress | Review after implementation |
 | `observability.md` | Implemented | Review needed |
 | `testing-strategy.md` | Implemented | Review needed |
+| `prefect-upgrade.md` | Implemented | Review after implementation |
 
 ## Spec Assessment Checklist
 
