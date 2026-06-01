@@ -7,19 +7,20 @@ Coordinates the data conversion agents:
   3. Map to target schema (transformation agent)
   4. Validate (quality agent)
   5. Append to CSV + rebuild RAG (integration agent)
+
+Prefect @task decorators handle retries, state persistence, and
+automatic error propagation — no manual try/except bookkeeping needed.
 """
 
 from pathlib import Path
 
 from prefect import flow
+from prefect.task_runners import ConcurrentTaskRunner
 
 from backend.agents import ingestion_agent, transformation_agent, quality_agent, integration_agent
 from backend.telemetry import get_logger
 
 log = get_logger("orchestrator")
-
-
-PIPELINE_STEPS = ["ingest", "transform", "validate", "integrate"]
 
 
 @flow(log_prints=True)
@@ -33,97 +34,47 @@ def run_pipeline(
     Execute the full MLOps pipeline on a single file (or the next
     discovered file if *file_path* is ``None``).
     """
-    report = {
-        "target": target,
-        "dry_run": dry_run,
-        "steps": {},
-        "passed": False,
-    }
-
-    # ── 1. Discover ────────────────────────────────────────
     if file_path is None:
         files = ingestion_agent.discover_new_files()
         if not files:
-            report["message"] = "No new files found in data/ingest/"
-            return report
+            return {"passed": False, "message": "No new files found in data/ingest/"}
         file_path = files[0]
 
     if not file_path.exists():
-        report["message"] = f"File not found: {file_path}"
-        return report
+        return {"passed": False, "message": f"File not found: {file_path}"}
 
     log.info("pipeline_started", file=file_path.name, target=target)
 
-    # ── 2. Ingest ──────────────────────────────────────────
-    log.info("step_ingest", file=file_path.name)
-    try:
-        rows = ingestion_agent.ingest(file_path)
-        report["steps"]["ingest"] = {"status": "ok", "records": len(rows)}
-    except Exception as exc:
-        report["steps"]["ingest"] = {"status": "failed", "error": str(exc)}
-        report["message"] = f"Ingestion failed: {exc}"
-        return report
+    rows = ingestion_agent.ingest(file_path)
+    log.info("step_ingest", records=len(rows))
 
-    # ── 3. Transform ───────────────────────────────────────
-    log.info("step_transform", target=target)
-    try:
-        preview = transformation_agent.preview(rows, target)
-        transformed = transformation_agent.transform(rows, target)
-        report["steps"]["transform"] = {
-            "status": "ok",
-            "records_out": len(transformed),
-        }
-        log.info("transform_complete", records=len(transformed))
-        for line in preview.splitlines()[:4]:
-            log.debug("preview", line=line)
-    except Exception as exc:
-        report["steps"]["transform"] = {"status": "failed", "error": str(exc)}
-        report["message"] = f"Transformation failed: {exc}"
-        return report
+    transformed = transformation_agent.transform(rows, target)
+    log.info("step_transform", records=len(transformed))
 
-    # ── 4. Validate ────────────────────────────────────────
-    log.info("step_validate", records=len(transformed))
     qr = quality_agent.quality_report(transformed, target)
-    report["steps"]["validate"] = qr
-
     if not qr["passed"]:
         log.warning("validation_failed", errors=qr['error_count'])
         for err in qr["errors"]:
             log.warning("validation_error", row=err['row'], field=err['field'], message=err['message'])
-        report["message"] = f"Quality checks failed: {qr['error_count']} error(s)"
-        return report
+        return {"passed": False, "target": target, "errors": qr["errors"]}
 
     log.info("validation_passed", records=len(transformed))
 
     if dry_run:
-        log.info("dry_run", detail="validation passed, no data committed")
-        report["passed"] = True
-        report["message"] = "Dry run: validation passed, no data committed."
-        return report
+        log.info("dry_run_mode", records=len(transformed))
+        return {"passed": True, "target": target, "rows_processed": len(transformed), "dry_run": True}
 
-    # ── 5. Integrate ───────────────────────────────────────
-    log.info("step_integrate")
-    try:
-        result = integration_agent.integrate(transformed, target, rebuild_rag=rebuild_rag)
-        report["steps"]["integrate"] = result
-        report["passed"] = True
-        report["message"] = (
-            f"Pipeline complete. {result['rows_written']} rows "
-            f"written to {Path(result['csv']).name}. "
-            f"RAG rebuild: {result['rag_rebuild']}."
-        )
-        log.info("integrate_complete")
-    except Exception as exc:
-        report["steps"]["integrate"] = {"status": "failed", "error": str(exc)}
-        report["message"] = f"Integration failed: {exc}"
-        return report
+    result = integration_agent.integrate(transformed, target, rebuild_rag=rebuild_rag)
+    log.info("pipeline_complete", rows=result['rows_processed'])
 
-    log.info("pipeline_complete", message=report['message'])
-
-    return report
+    return {
+        "passed": True,
+        "target": target,
+        **result,
+    }
 
 
-@flow(log_prints=True)
+@flow(log_prints=True, task_runner=ConcurrentTaskRunner)
 def run_all(rebuild_rag: bool = True, dry_run: bool = False) -> list[dict]:
     """Run the pipeline on every file in the ingest directory."""
     files = ingestion_agent.discover_new_files()
@@ -133,6 +84,6 @@ def run_all(rebuild_rag: bool = True, dry_run: bool = False) -> list[dict]:
 
     reports = []
     for f in files:
-        r = run_pipeline(f, target="inventory", rebuild_rag=rebuild_rag, dry_run=dry_run)
-        reports.append(r)
+        report = run_pipeline(file_path=f, target="inventory", rebuild_rag=rebuild_rag, dry_run=dry_run)
+        reports.append(report)
     return reports

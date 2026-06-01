@@ -63,6 +63,8 @@ spec:
               value: /app/data/chroma_shipping_db
             - name: SENTENCE_TRANSFORMERS_HOME
               value: /cache
+            - name: PREFECT_API_URL
+              value: http://prefect-server:4200/api
           volumeMounts:
             - name: chroma-storage
               mountPath: /app/data/chroma_shipping_db

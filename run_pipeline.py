@@ -22,7 +22,7 @@ import sys
 from pathlib import Path
 
 from backend.orchestrator import run_pipeline, run_all
-from backend.watcher import watch, run_once as watch_once
+from backend.deployments import watch_once
 
 TARGETS = ["inventory", "inventory_category", "purchase_order", "invoice", "shipping_order"]
 
@@ -83,16 +83,10 @@ def main():
         )
         return
 
-    # ── Watch mode ──────────────────────────────────────────
+    # ── Watch mode (runs once via the Prefect deployment) ──
     if args.watch:
-        import backend.watcher as watcher
-        watcher.POLL_INTERVAL = max(args.interval, 1)
-        if args.watch_once:
-            result = watch_once(rebuild_rag=not args.no_rag)
-            sys.exit(0 if all(r["passed"] for r in result) else 1)
-        else:
-            watch(rebuild_rag=not args.no_rag)
-            sys.exit(0)
+        result = watch_once(rebuild_rag=not args.no_rag)
+        sys.exit(0 if result else 1)
 
     # ── One-shot modes ──────────────────────────────────────
     if args.all:

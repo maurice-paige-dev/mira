@@ -6,6 +6,7 @@ committed to the CSV store.
 """
 
 from prefect import task
+from prefect.cache_policies import INPUTS
 
 from backend.agents.schema_config import TARGETS
 from backend.telemetry import get_logger
@@ -78,7 +79,7 @@ def validate(rows: list[dict], target_key: str) -> list[dict]:
     return errors
 
 
-@task
+@task(cache_policy=INPUTS)
 def quality_report(rows: list[dict], target_key: str) -> dict:
     """Run validation and return a structured pass/fail report."""
     errors = validate(rows, target_key)

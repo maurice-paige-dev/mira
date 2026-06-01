@@ -106,5 +106,13 @@ CONSUMER_LAST_SUCCESS = Gauge(
 )
 
 
+# Prefect orchestration metrics
+PREFECT_FLOW_STATE = Gauge(
+    "prefect_flow_state",
+    "Current Prefect flow run state (0=pending, 1=running, 2=completed, 3=failed, 4=crashed)",
+    ["flow_name", "state"],
+)
+
+
 def metrics_endpoint(request):
     return Response(content=generate_latest(), media_type=CONTENT_TYPE_LATEST)

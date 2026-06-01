@@ -20,6 +20,10 @@ Catalog SPA    ──▶  Catalog API  ──▶  PostgreSQL (product queries)
                └──  Upload API   ──▶  Kafka (file→record streaming)
 
 PDF files      ──▶  pipeline.py   ──▶  CSV (legacy import)
+
+Prefect Server  ──▶  Deployment (cron)  ──▶  pipelines (watch_once,
+                 │                        │   bulk_reprocess)
+                 └──  API (HTTP)      ──▶  agent → worker pool
 ```
 
 ## Repo structure
@@ -40,8 +44,8 @@ PDF files      ──▶  pipeline.py   ──▶  CSV (legacy import)
 │   ├── vector_store.py      Full ChromaDB rebuild (legacy)
 │   ├── telemetry.py         Structured logging (structlog)
 │   ├── metrics.py           Prometheus metric definitions
-│   ├── orchestrator.py      Prefect flow (legacy)
-│   └── watcher.py           File watcher (legacy)
+│   ├── orchestrator.py      Prefect flows (run_pipeline, run_all)
+│   └── deployments.py       Prefect scheduled deployments (watch_once, bulk_reprocess)
 ├── frontend/
 │   ├── chatbot/             React chatbot with SSE streaming + agent trace UI
 │   └── catalog/             Static catalog SPA
@@ -76,8 +80,14 @@ python -m uvicorn backend.api_rag:app --host 0.0.0.0 --port 8000
 # Catalog API (port 8001)
 python -m uvicorn backend.api_catalog:app --host 0.0.0.0 --port 8001
 
-# Legacy batch pipeline
-python run_pipeline.py --all --target inventory
+# Prefect server (persistent orchestration)
+prefect server start
+
+# Register deployments (run once after server is up)
+python -m backend.deployments
+
+# Run the pipeline on a single file
+python -m backend.orchestrator run_pipeline --file-path data/ingest/products.csv
 
 # Frontend
 cd frontend/chatbot && npm install && npm run dev
@@ -93,7 +103,7 @@ cd frontend/chatbot && npm install && npm run dev
 | [Testing strategy](specs/testing-strategy.md) | pytest suite, CI integration, mock strategy, coverage targets |
 | [Agentic chat spec](specs/agentic-chat.md) | LangGraph multi-agent workflow with 6 specialist agents + image CDN |
 | [CI/CD pipeline](k8s/ci-cd-spec.md) | GitHub Actions: build, push, kustomize render, artifact upload |
-| [K8s deployment](k8s/README.md) | Full Kubernetes spec: components, networking, storage, rollout |
+| [Prefect orchestration](specs/prefect-upgrade.md) | Prefect server, scheduled deployments, caching, ConcurrenTaskRunner |
 | [Terraform infra](k8s/terraform-infrastructure.md) | AWS infrastructure-as-code: EKS, RDS, MSK, S3, ECR, Route53, ACM |
 | **Operational guides** | |
 | [DevOps guide](docs/devops.md) | Deployment commands, local dev, troubleshooting |
@@ -114,6 +124,7 @@ cd frontend/chatbot && npm install && npm run dev
 
 ## Key decisions
 
+- **Prefect orchestration** — Scheduled deployments replace file-watcher polling loop; ConcurrentTaskRunner for parallel pipeline execution; server mode for state persistence and UI
 - **Event-driven** — Kafka streaming pipeline replaces batch CronJob for real-time ingestion
 - **Incremental ChromaDB upsert** — single-record embedding instead of full O(N) rebuild
 - **LangGraph agent system** — 6 specialist agents with local LLM (Ollama/llama3), SSE streaming

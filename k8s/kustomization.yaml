@@ -18,6 +18,7 @@ resources:
   - vault/secretstore.yaml
   - vault/external-secrets.yaml
   - hpa.yaml
+  - prefect.yaml
 
 images:
   - name: backend

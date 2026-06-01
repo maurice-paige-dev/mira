@@ -33,6 +33,9 @@ uvicorn backend.api_rag:app --reload
 #   ollama pull llama3.1
 #   OLLAMA_BASE_URL=http://localhost:11434
 
+# Prefect server (persistent orchestration + UI):
+prefect server start
+
 # Kafka consumer (requires Kafka + PostgreSQL):
 python -m backend.kafka_consumer
 ```
